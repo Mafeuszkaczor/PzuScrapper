@@ -1,16 +1,16 @@
 using System.Text.Json;
 using Microsoft.Playwright;
+using PzuScrapper.Configuration;
 
 namespace PzuScrapper.Session;
 
-/// <summary>Odczyt i zapis pliku cookies.json w formacie Playwright.</summary>
 internal sealed class CookieFileStore
 {
     private readonly string _path;
 
-    public CookieFileStore(string path = "cookies.json")
+    public CookieFileStore(string? path = null)
     {
-        _path = path;
+        _path = path ?? LocalDataPaths.Cookies;
     }
 
     public async Task LoadIntoAsync(IBrowserContext context)
@@ -20,10 +20,11 @@ internal sealed class CookieFileStore
 
         var json = await File.ReadAllTextAsync(_path);
         var dtos = JsonSerializer.Deserialize<List<CookieJsonDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        if (dtos is not { Count: > 0 })
+        var withValues = dtos.Where(d => !string.IsNullOrWhiteSpace(d.Value)).ToList();
+        if (withValues.Count == 0)
             return;
 
-        var cookies = dtos.Select(ToPlaywrightCookie).ToList();
+        var cookies = withValues.Select(ToPlaywrightCookie).ToList();
         await context.AddCookiesAsync(cookies);
         Console.WriteLine($"[Session] Wczytano {cookies.Count} cookies.");
     }
@@ -54,7 +55,6 @@ internal sealed class CookieFileStore
     };
 }
 
-/// <summary>Rekord z cookies.json (nie Playwright.Cookie – SameSite jako string).</summary>
 internal sealed class CookieJsonDto
 {
     public string Name     { get; set; } = string.Empty;

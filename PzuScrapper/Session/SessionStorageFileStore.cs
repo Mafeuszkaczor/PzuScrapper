@@ -1,15 +1,15 @@
 using Microsoft.Playwright;
+using PzuScrapper.Configuration;
 
 namespace PzuScrapper.Session;
 
-/// <summary>Odczyt i zapis session-storage.json oraz init script dla kontekstu.</summary>
 internal sealed class SessionStorageFileStore
 {
     private readonly string _path;
 
-    public SessionStorageFileStore(string path = "session-storage.json")
+    public SessionStorageFileStore(string? path = null)
     {
-        _path = path;
+        _path = path ?? LocalDataPaths.SessionStorage;
     }
 
     public async Task InjectIntoAsync(IBrowserContext context)
@@ -24,9 +24,9 @@ internal sealed class SessionStorageFileStore
                 const storage = JSON.parse(storageJson);
                 if (window.location.hostname === 'ppo.pzu.pl' ||
                     window.location.hostname.endsWith('.ppo.pzu.pl')) {{
-                    for (const [key, value] of Object.entries(storage)) {{
-                        window.sessionStorage.setItem(key, value);
-                    }}
+                        for (const [key, value] of Object.entries(storage)) {{
+                            if (value) window.sessionStorage.setItem(key, value);
+                        }}
                 }}
             }})('{sessionJson.Replace("'", "\\'")}')
         ");

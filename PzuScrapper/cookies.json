@@ -1,0 +1,42 @@
+[
+  {
+    "name": "LastMRH_Session",
+    "value": "",
+    "domain": ".pzu.pl",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "None"
+  },
+  {
+    "name": "MRHSession",
+    "value": "",
+    "domain": ".pzu.pl",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "None"
+  },
+  {
+    "name": "TS014c395d",
+    "value": "",
+    "domain": "ppo.pzu.pl",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "None"
+  },
+  {
+    "name": "TS01b92acc",
+    "value": "",
+    "domain": ".pzu.pl",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "None"
+  }
+]
