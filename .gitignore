@@ -362,5 +362,11 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-# Lokalne sekrety / sesja (nadpisują szablony *.json w repozytorium)
+# Lokalne sekrety (nadpisują szablony w repozytorium)
+appsettings.*.json
+!appsettings.json
+cookies.*.json
+!cookies.json
+session-storage.*.json
+!session-storage.json
 *.development.json

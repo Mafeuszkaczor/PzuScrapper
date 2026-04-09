@@ -3,7 +3,7 @@ using Microsoft.Playwright;
 
 namespace PzuScrapper.Api;
 
-/// <summary>HttpClient do API PZU z nagłówkami jak przeglądarka (Bearer + Cookie).</summary>
+/// <summary>HttpClient for PZU API with browser-like headers (Bearer + Cookie).</summary>
 internal static class PzuHttpClientFactory
 {
     private static readonly Uri BaseUri = new("https://ppo.pzu.pl");

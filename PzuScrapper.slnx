@@ -1,5 +1,4 @@
 <Solution>
   <Project Path="Models/Models.csproj" Id="86ca3ea7-9f9f-4094-a400-6d87c1224a20" />
-  <Project Path="PlaywrightTests/PlaywrightTests.csproj" />
   <Project Path="PzuScrapper/PzuScrapper.csproj" />
 </Solution>

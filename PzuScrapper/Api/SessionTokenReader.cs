@@ -2,7 +2,7 @@ using Microsoft.Playwright;
 
 namespace PzuScrapper.Api;
 
-/// <summary>Wyciąga Bearer z sessionStorage strony (po zalogowaniu).</summary>
+/// <summary>Reads Bearer token from the page sessionStorage (after login).</summary>
 internal static class SessionTokenReader
 {
     public static async Task<string?> ReadAsync(IPage page)
@@ -22,9 +22,10 @@ internal static class SessionTokenReader
         }");
 
         if (token == null)
-            Console.WriteLine("UWAGA: Nie znaleziono tokenu auth w sessionStorage. Żądania API mogą być odrzucone.");
+            Console.WriteLine(
+                "[Scrape] Ostrzeżenie: nie udało się odczytać uprawnień z przeglądarki. Lista ofert może być niepełna.");
         else
-            Console.WriteLine("Token auth wydobyty pomyślnie.");
+            Console.WriteLine("[Scrape] Połączenie z listą ofert gotowe.");
 
         return token;
     }

@@ -9,28 +9,36 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Models\Models.csproj" />
-    <ProjectReference Include="..\PlaywrightTests\PlaywrightTests.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="appsettings.Development.json" Condition="Exists('appsettings.Development.json')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <DependentUpon>appsettings.json</DependentUpon>
+    </None>
     <None Update="appsettings.development.json" Condition="Exists('appsettings.development.json')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <DependentUpon>appsettings.json</DependentUpon>
     </None>
-    <None Update="cookies.json">
+    <None Update="browser-state.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="cookies.development.json" Condition="Exists('cookies.development.json')">
+    <None Update="browser-state.Development.json" Condition="Exists('browser-state.Development.json')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <DependentUpon>browser-state.json</DependentUpon>
     </None>
-    <None Update="session-storage.json">
+    <None Update="browser-state.development.json" Condition="Exists('browser-state.development.json')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <DependentUpon>browser-state.json</DependentUpon>
     </None>
-    <None Update="session-storage.development.json" Condition="Exists('session-storage.development.json')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.5" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.58.0" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,14 @@
-using PzuScrapper;
+using Microsoft.Extensions.Hosting;
+using PzuScrapper.Application;
+using PzuScrapper.Auctions;
 using PzuScrapper.Configuration;
 
-var session = AppSettingsLoader.LoadSiteSession();
-var scrapper = new Scrapper(session);
-await scrapper.Scrape();
+var builder = Host.CreateApplicationBuilder(args);
+Console.WriteLine("[Konfiguracja] Start programu.");
+
+AppConfiguration.AddOptionalDevelopmentJson(builder);
+
+var session = AppConfiguration.CreateSiteSession(builder.Configuration);
+var searchFilters = BidderSearchFiltersPrompt.Read();
+
+//await new ScrapeOrchestrator(session, builder.Environment, searchFilters).RunAsync();

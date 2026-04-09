@@ -1,64 +1,59 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿namespace Models;
 
-namespace Models
+public class Car
 {
-    public class Car
-    {
-        public string statusDescription { get; set; }
-        public string auctionUniqueNumber { get; set; }
-        public string auctionType { get; set; }
-        public string postalCode { get; set; }
-        public string manufacturer { get; set; }
-        public string model { get; set; }
-        public string currencyCode { get; set; }
-        public string engineType { get; set; }
-        public int capacityValue { get; set; }
-        public int powerValue { get; set; }
-        public int mileageValue { get; set; }
-        public string gearbox { get; set; }
-        public string privatelyImported { get; set; }
-        public string toCassation { get; set; }
-        public object propertyName { get; set; }
-        public object quantity { get; set; }
-        public string type { get; set; }
-        public object propertyDamageType { get; set; }
-        public string auctionTypeCode { get; set; }
-        public string biddingTypeDescription { get; set; }
-        public string auctionItemCode { get; set; }
-        public string statusCode { get; set; }
-        public string capacityUnitMeasurment { get; set; }
-        public string powerUnitMeasurment { get; set; }
-        public string countryCode { get; set; }
-        public string mileageUnitMeasurment { get; set; }
-        public double totalRepairCost { get; set; }
-        public string firstOwner { get; set; }
-        public string vatDeduction { get; set; }
-        public string leasing { get; set; }
-        public string airbagDamaged { get; set; }
-        public string drivable { get; set; }
-        public string rollable { get; set; }
-        public string engineWorking { get; set; }
-        public object propertyUnitMeasurment { get; set; }
-        public object serialNumber { get; set; }
-        public object description { get; set; }
-        public object repairDescription { get; set; }
-        public string damageDescriptionReplacedElements { get; set; }
-        public string damageDescriptionRepair { get; set; }
-        public string comments { get; set; }
-        public int mainImageId { get; set; }
-        public string mainImageFilename { get; set; }
-        public DateTime expirationDate { get; set; }
-        public DateTime auctionStartDate { get; set; }
-        public int productionYear { get; set; }
-        public int grossAmountBeforeDamage { get; set; }
-        public object myOffer { get; set; }
-        public int estimatedGrossResidueAmount { get; set; }
-        public int relatedOffersCount { get; set; }
-        public bool canCreateOffer { get; set; }
-        public bool canPrintAuction { get; set; }
-        public object bestOfferValue { get; set; }
-        public bool anyRelatedPermittedOffer { get; set; }
-    }
+    public string? statusDescription { get; set; }
+    public string? auctionUniqueNumber { get; set; }
+    public string? auctionType { get; set; }
+    public string? postalCode { get; set; }
+    public string? manufacturer { get; set; }
+    public string? model { get; set; }
+    public string? currencyCode { get; set; }
+    public string? engineType { get; set; }
+    public int? capacityValue { get; set; }
+    public int? powerValue { get; set; }
+    public int? mileageValue { get; set; }
+    public string? gearbox { get; set; }
+    public string? privatelyImported { get; set; }
+    public string? toCassation { get; set; }
+    public object? propertyName { get; set; }
+    public object? quantity { get; set; }
+    public string? type { get; set; }
+    public object? propertyDamageType { get; set; }
+    public string? auctionTypeCode { get; set; }
+    public string? biddingTypeDescription { get; set; }
+    public string? auctionItemCode { get; set; }
+    public string? statusCode { get; set; }
+    public string? capacityUnitMeasurment { get; set; }
+    public string? powerUnitMeasurment { get; set; }
+    public string? countryCode { get; set; }
+    public string? mileageUnitMeasurment { get; set; }
+    public double? totalRepairCost { get; set; }
+    public string? firstOwner { get; set; }
+    public string? vatDeduction { get; set; }
+    public string? leasing { get; set; }
+    public string? airbagDamaged { get; set; }
+    public string? drivable { get; set; }
+    public string? rollable { get; set; }
+    public string? engineWorking { get; set; }
+    public object? propertyUnitMeasurment { get; set; }
+    public object? serialNumber { get; set; }
+    public object? description { get; set; }
+    public object? repairDescription { get; set; }
+    public string? damageDescriptionReplacedElements { get; set; }
+    public string? damageDescriptionRepair { get; set; }
+    public string? comments { get; set; }
+    public int? mainImageId { get; set; }
+    public string? mainImageFilename { get; set; }
+    public DateTime? expirationDate { get; set; }
+    public DateTime? auctionStartDate { get; set; }
+    public int? productionYear { get; set; }
+    public int? grossAmountBeforeDamage { get; set; }
+    public object? myOffer { get; set; }
+    public int? estimatedGrossResidueAmount { get; set; }
+    public int? relatedOffersCount { get; set; }
+    public bool? canCreateOffer { get; set; }
+    public bool? canPrintAuction { get; set; }
+    public object? bestOfferValue { get; set; }
+    public bool? anyRelatedPermittedOffer { get; set; }
 }
