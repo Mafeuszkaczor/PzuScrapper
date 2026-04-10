@@ -11,4 +11,4 @@ AppConfiguration.AddOptionalDevelopmentJson(builder);
 var session = AppConfiguration.CreateSiteSession(builder.Configuration);
 var searchFilters = BidderSearchFiltersPrompt.Read();
 
-//await new ScrapeOrchestrator(session, builder.Environment, searchFilters).RunAsync();
+await new ScrapeOrchestrator(session, builder.Environment, searchFilters).RunAsync();

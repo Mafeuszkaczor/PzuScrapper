@@ -61,7 +61,7 @@ internal sealed class PzuAuthFlow
         Console.WriteLine("[Auth] Sprawdzam dostęp do listy ofert…");
         try
         {
-            await _page.WaitForURLAsync(SearchUrlPattern, new PageWaitForURLOptions { Timeout = 15_000 });
+            await _page.WaitForURLAsync(SearchUrlPattern, new PageWaitForURLOptions { Timeout = 20_000 });
             await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
             Console.WriteLine("[Auth] Zalogowano!");
             return true;

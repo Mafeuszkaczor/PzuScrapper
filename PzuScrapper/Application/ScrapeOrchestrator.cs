@@ -34,7 +34,7 @@ public sealed class ScrapeOrchestrator
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         using var playwright = await Playwright.CreateAsync();
-        var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
+        var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
 
         Console.WriteLine("[Scrape] Otwieram przeglądarkę…");
         var context = await browser.NewContextAsync(_sessionPersistence.BuildNewContextOptions());
