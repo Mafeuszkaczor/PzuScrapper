@@ -10,13 +10,21 @@ public sealed class CarPhotoScraper
     private const string CounterSelector = ".image-large__counter-text";
     private const string NextArrowSelector = "img[src*='next-arrow']";
 
+    /// <summary>Katalog roboczy zdjęć dla pojazdu (VIN lub numer oferty).</summary>
+    public static string ResolvePhotoDirectory(Car car)
+    {
+        var vin = car.serialNumber?.ToString();
+        var folderName = !string.IsNullOrWhiteSpace(vin) ? vin : car.auctionUniqueNumber ?? "unknown";
+        return Path.Combine(AutaCsvPaths.PhotosDirectory, folderName);
+    }
+
     public async Task GetPhotosAsync(IPage page, Car car, HttpClient http)
     {
         var vin = car.serialNumber?.ToString();
         var folderName = !string.IsNullOrWhiteSpace(vin) ? vin : car.auctionUniqueNumber ?? "unknown";
         var label = folderName;
 
-        var outputDir = Path.Combine(AutaCsvPaths.DesktopPhotosDirectory, folderName);
+        var outputDir = ResolvePhotoDirectory(car);
         Directory.CreateDirectory(outputDir);
 
         try

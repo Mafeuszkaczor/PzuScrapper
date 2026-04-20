@@ -2,10 +2,13 @@ namespace PzuScrapper.Configuration;
 
 internal static class AutaCsvPaths
 {
-    private static string Desktop => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    private static string CommonApplicationDataPath =>
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
 
-    public static string DesktopAutaCsv => Path.Combine(Desktop, "auta.csv");
+    private static string AppDataDirectory => System.IO.Path.Combine(CommonApplicationDataPath, "PzuScrapper");
 
-    /// <summary>Photo output folder: Desktop\photos\{auction number or VIN}\</summary>
-    public static string DesktopPhotosDirectory => Path.Combine(Desktop, "photos");
+    public static string CarsJsonLinesPath => System.IO.Path.Combine(AppDataDirectory, "cars.jsonl");
+
+    /// <summary>Photo output folder: CommonApplicationData/PzuScrapper/photos/{auction number or VIN}/</summary>
+    public static string PhotosDirectory => System.IO.Path.Combine(AppDataDirectory, "photos");
 }

@@ -1,3 +1,4 @@
+using PzuScrapper.Models.Request;
 using System.Globalization;
 
 namespace PzuScrapper.Auctions;
@@ -7,7 +8,7 @@ public static class BidderSearchFiltersPrompt
 {
     private const int MinProductionYear = 1950;
 
-    public static BidderSearchFilters Read()
+    public static BidderSearchFiltersRequest Read()
     {
         Console.WriteLine("\n *** Jeśli nie chcesz używać filtra nie wpisuj wartości i zatwierdź enterem ***");
 
@@ -35,7 +36,7 @@ public static class BidderSearchFiltersPrompt
 
         var vehicleCategoryCodes = ReadVehicleCategoryChoice(categoryEntries);
 
-        return new BidderSearchFilters
+        return new BidderSearchFiltersRequest
         {
             ProductionYearFrom = minYear?.ToString(CultureInfo.InvariantCulture),
             ProductionYearTo = maxYear?.ToString(CultureInfo.InvariantCulture),

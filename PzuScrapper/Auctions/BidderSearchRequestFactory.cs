@@ -1,11 +1,12 @@
 using Models;
 using Models.Enum;
+using PzuScrapper.Models.Request;
 
 namespace PzuScrapper.Auctions;
 
 internal static class BidderSearchRequestFactory
 {
-    public static SearchRequest Create(int pageNumber, BidderSearchFilters? filters = null)
+    public static SearchRequest Create(int pageNumber, BidderSearchFiltersRequest? filters = null)
     {
         var now = DateTime.UtcNow;
         var threeMonthsAgo = now.AddMonths(-3);

@@ -2,6 +2,9 @@ using Microsoft.Extensions.Hosting;
 using PzuScrapper.Application;
 using PzuScrapper.Auctions;
 using PzuScrapper.Configuration;
+using QuestPDF.Infrastructure;
+
+QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = Host.CreateApplicationBuilder(args);
 Console.WriteLine("[Konfiguracja] Start programu.");

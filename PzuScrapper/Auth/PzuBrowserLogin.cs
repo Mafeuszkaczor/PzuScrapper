@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Playwright;
 using PzuScrapper.Models;
 
@@ -81,9 +82,17 @@ internal sealed class PzuBrowserLogin
         const int maxAttempts = 5;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            Console.WriteLine($"[2FA] Podaj 6-cyfrowy kod z SMS (próba {attempt}/{maxAttempts}):");
-            Console.Out.Flush();
-            var smsCode = Console.ReadLine() ?? string.Empty;
+            string smsCode;
+            while (true)
+            {
+                Console.WriteLine($"[2FA] Podaj 6-cyfrowy kod z SMS (próba {attempt}/{maxAttempts}):");
+                Console.Out.Flush();
+                var raw = Console.ReadLine() ?? string.Empty;
+                smsCode = NormalizeSmsCodeInput(raw);
+                if (IsValidSixDigitIntCode(smsCode))
+                    break;
+                Console.WriteLine("[2FA] Kod musi być 6-cyfrową liczbą (możesz użyć spacji). Spróbuj ponownie.");
+            }
 
             await codeInput.ClickAsync();
             await codeInput.FillAsync(smsCode);
@@ -101,5 +110,19 @@ internal sealed class PzuBrowserLogin
         }
 
         return page;
+    }
+
+    private static string NormalizeSmsCodeInput(string input)
+    {
+        var trimmed = input.Trim();
+        return string.Concat(trimmed.Where(c => !char.IsWhiteSpace(c)));
+    }
+
+    private static bool IsValidSixDigitIntCode(string normalized)
+    {
+        if (normalized.Length != 6 || !normalized.All(char.IsDigit))
+            return false;
+        return int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v)
+               && v is >= 0 and <= 999_999;
     }
 }
