@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Hosting;
-using PzuScrapper.Application;
-using PzuScrapper.Auctions;
 using PzuScrapper.Configuration;
+using PzuScrapper.Search;
 using QuestPDF.Infrastructure;
 
 QuestPDF.Settings.License = LicenseType.Community;
@@ -14,4 +13,4 @@ AppConfiguration.AddOptionalDevelopmentJson(builder);
 var session = AppConfiguration.CreateSiteSession(builder.Configuration);
 var searchFilters = BidderSearchFiltersPrompt.Read();
 
-await new ScrapeOrchestrator(session, builder.Environment, searchFilters).RunAsync();
+await new PzuScrapper.ScrapeOrchestrator(session, builder.Environment, searchFilters).RunAsync();

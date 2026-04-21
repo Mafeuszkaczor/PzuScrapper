@@ -1,4 +1,3 @@
-using System.Net.Http;
 using Microsoft.Playwright;
 using Models;
 using PzuScrapper.Configuration;
@@ -10,19 +9,18 @@ public sealed class CarPhotoScraper
     private const string CounterSelector = ".image-large__counter-text";
     private const string NextArrowSelector = "img[src*='next-arrow']";
 
-    /// <summary>Katalog roboczy zdjęć dla pojazdu (VIN lub numer oferty).</summary>
+    /// <summary>Working photo folder for a vehicle (VIN or auction number).</summary>
     public static string ResolvePhotoDirectory(Car car)
     {
         var vin = car.serialNumber?.ToString();
         var folderName = !string.IsNullOrWhiteSpace(vin) ? vin : car.auctionUniqueNumber ?? "unknown";
-        return Path.Combine(AutaCsvPaths.PhotosDirectory, folderName);
+        return Path.Combine(AppPaths.PhotosDirectory, folderName);
     }
 
     public async Task GetPhotosAsync(IPage page, Car car, HttpClient http)
     {
         var vin = car.serialNumber?.ToString();
         var folderName = !string.IsNullOrWhiteSpace(vin) ? vin : car.auctionUniqueNumber ?? "unknown";
-        var label = folderName;
 
         var outputDir = ResolvePhotoDirectory(car);
         Directory.CreateDirectory(outputDir);
@@ -33,22 +31,22 @@ public sealed class CarPhotoScraper
         }
         catch
         {
-            Console.WriteLine($"  [{label}] Brak galerii zdjęć – pomijam.");
+            Console.WriteLine($"  [{folderName}] Brak galerii zdjęć – pomijam.");
             return;
         }
 
         var counterText = await page.Locator(CounterSelector).InnerTextAsync();
         var totalPhotos = ParseTotalFromCounter(counterText);
-        Console.WriteLine($"  [{label}] W galerii: {totalPhotos} zdjęć.");
+        Console.WriteLine($"  [{folderName}] W galerii: {totalPhotos} zdjęć.");
 
         var missingCount = CountMissingPhotos(outputDir, totalPhotos);
         if (missingCount == 0)
         {
-            Console.WriteLine($"  [{label}] Komplet ({totalPhotos} szt., foto_001.jpg – foto_{totalPhotos:000}.jpg) – pomijam galerię.");
+            Console.WriteLine($"  [{folderName}] Komplet ({totalPhotos} szt.) – pomijam galerię.");
             return;
         }
 
-        Console.WriteLine($"  [{label}] Brakuje {missingCount}/{totalPhotos} zdjęć – przechodzę galerię i uzupełniam.");
+        Console.WriteLine($"  [{folderName}] Brakuje {missingCount}/{totalPhotos} zdjęć – uzupełniam.");
 
         for (var i = 0; i < totalPhotos; i++)
         {
@@ -60,59 +58,48 @@ public sealed class CarPhotoScraper
             if (!string.IsNullOrEmpty(imgSrc))
             {
                 if (File.Exists(filePath))
-                    Console.WriteLine($"  [{label}] {i + 1}/{totalPhotos} – już zapisane, przechodzę dalej.");
+                    Console.WriteLine($"  [{folderName}] {i + 1}/{totalPhotos} – już zapisane.");
                 else
                 {
-                    await DownloadImageAsync(page, http, imgSrc, filePath, label, i + 1, totalPhotos);
-                    if (File.Exists(filePath))
-                        Console.WriteLine($"  [{label}] {i + 1}/{totalPhotos} – zapisano.");
-                    else
-                        Console.WriteLine($"  [{label}] {i + 1}/{totalPhotos} – nie udało się zapisać.");
+                    await DownloadImageAsync(page, http, imgSrc, filePath, folderName, i + 1, totalPhotos);
+                    Console.WriteLine(File.Exists(filePath)
+                        ? $"  [{folderName}] {i + 1}/{totalPhotos} – zapisano."
+                        : $"  [{folderName}] {i + 1}/{totalPhotos} – nie udało się zapisać.");
                 }
             }
             else
-                Console.WriteLine($"  [{label}] {i + 1}/{totalPhotos} – brak podglądu, pomijam.");
+                Console.WriteLine($"  [{folderName}] {i + 1}/{totalPhotos} – brak podglądu, pomijam.");
 
             if (i < totalPhotos - 1)
             {
                 await page.Locator(NextArrowSelector).First.ClickAsync();
-
                 var expectedIndex = i + 2;
                 await page.WaitForFunctionAsync(
                     @"(idx) => {
-                            const el = document.querySelector('.image-large__counter-text');
-                            return el && el.innerText.trim().startsWith(idx + ' ');
-                        }",
+                        const el = document.querySelector('.image-large__counter-text');
+                        return el && el.innerText.trim().startsWith(idx + ' ');
+                    }",
                     arg: expectedIndex,
-                    new PageWaitForFunctionOptions { Timeout = 10_000 }
-                );
+                    new PageWaitForFunctionOptions { Timeout = 10_000 });
             }
         }
     }
 
-    /// <summary>How many of foto_001…foto_N are missing vs. the count reported by the page.</summary>
     private static int CountMissingPhotos(string outputDir, int totalPhotos)
     {
         var n = 0;
         for (var j = 1; j <= totalPhotos; j++)
-        {
-            var p = Path.Combine(outputDir, $"foto_{j:D3}.jpg");
-            if (!File.Exists(p))
+            if (!File.Exists(Path.Combine(outputDir, $"foto_{j:D3}.jpg")))
                 n++;
-        }
-
         return n;
     }
 
     private static int ParseTotalFromCounter(string counterText)
     {
         var parts = counterText.Split('/');
-        if (parts.Length == 2 && int.TryParse(parts[1].Trim(), out var total))
-            return total;
-        return 1;
+        return parts.Length == 2 && int.TryParse(parts[1].Trim(), out var total) ? total : 1;
     }
 
-    /// <summary>blob: only in browser (fetch + FileReader); http(s) via HttpClient.</summary>
     private static async Task DownloadImageAsync(
         IPage page,
         HttpClient http,
@@ -146,7 +133,7 @@ public sealed class CarPhotoScraper
                     }",
                     imgSrc);
                 if (string.IsNullOrEmpty(b64))
-                    throw new InvalidOperationException("Empty blob decode result (base64).");
+                    throw new InvalidOperationException("Empty blob decode result.");
                 bytes = Convert.FromBase64String(b64);
             }
             else
