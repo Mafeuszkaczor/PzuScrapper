@@ -1,13 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿namespace PzuScrapper.Models;
 
-namespace PzuScrapper.Models
+public sealed class SiteSession
 {
-    public class SiteSession
-    {
-        public string Login { get; set; }
-        public string Password { get; set; }
-        public string SessionJson { get; set; }
-    }
+    public required string Login { get; init; }
+    public required string Password { get; init; }
+    public string? SessionJson { get; init; }
 }

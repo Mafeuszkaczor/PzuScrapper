@@ -1,5 +1,5 @@
 using System.Globalization;
-using Models;
+using PzuScrapper.Models;
 
 namespace PzuScrapper.Search;
 
@@ -23,11 +23,9 @@ internal static class BidderSearchFiltersPrompt
 
             if (minYear.HasValue && maxYear.HasValue && minYear.Value > maxYear.Value)
             {
-                Console.WriteLine(
-                    "[Filtry] Minimalny rok nie może być większy od maksymalnego. Wpisz oba ponownie.\n");
+                Log.Warn("Filtry", "Minimalny rok nie może być większy od maksymalnego. Wpisz oba ponownie.\n");
                 continue;
             }
-
             break;
         }
 
@@ -36,13 +34,11 @@ internal static class BidderSearchFiltersPrompt
             .Select(kv => (Code: kv.Key, Description: kv.Value))
             .ToList();
 
-        var vehicleCategoryCodes = ReadVehicleCategoryChoice(categoryEntries);
-
         return new BidderSearchFiltersRequest
         {
             ProductionYearFrom = minYear?.ToString(CultureInfo.InvariantCulture),
             ProductionYearTo = maxYear?.ToString(CultureInfo.InvariantCulture),
-            VehicleCategoryCodes = vehicleCategoryCodes,
+            VehicleCategoryCodes = ReadVehicleCategoryChoice(categoryEntries),
         };
     }
 
@@ -53,7 +49,7 @@ internal static class BidderSearchFiltersPrompt
         {
             Console.WriteLine();
             Console.WriteLine(prompt);
-            var raw = Console.ReadLine()?.Trim();
+            var raw = ReadLineWithArrow();
             if (string.IsNullOrEmpty(raw))
                 return null;
 
@@ -61,11 +57,9 @@ internal static class BidderSearchFiltersPrompt
                 || y < MinProductionYear
                 || y > maxYear)
             {
-                Console.WriteLine(
-                    $"[Filtry] Niepoprawny rok. Podaj liczbę całkowitą od {MinProductionYear} do {maxYear}, albo Enter aby pominąć.");
+                Log.Warn("Filtry", $"Niepoprawny rok. Podaj liczbę od {MinProductionYear} do {maxYear}, albo Enter aby pominąć.");
                 continue;
             }
-
             return y;
         }
     }
@@ -79,29 +73,32 @@ internal static class BidderSearchFiltersPrompt
             Console.WriteLine("[Filtry] Wybierz typ pojazdu — numer z listy, 0 lub Enter = brak filtra");
             for (var i = 0; i < categoryEntries.Count; i++)
                 Console.WriteLine($" {i + 1} — {categoryEntries[i].Description}");
-            Console.Out.Flush();
 
-            var raw = Console.ReadLine()?.Trim();
-            if (string.IsNullOrEmpty(raw))
-                return null;
-            if (raw == "0")
+            var raw = ReadLineWithArrow();
+            if (string.IsNullOrEmpty(raw) || raw == "0")
                 return null;
 
             if (!int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var n))
             {
-                Console.WriteLine("[Filtry] Wpisz liczbę (numer z listy, 0 lub Enter).");
+                Log.Warn("Filtry", "Wpisz liczbę (numer z listy, 0 lub Enter).");
                 continue;
             }
 
             if (n < 1 || n > categoryEntries.Count)
             {
-                Console.WriteLine(
-                    $"[Filtry] Wybierz numer od 1 do {categoryEntries.Count}, albo 0 / Enter aby pominąć kategorię.");
+                Log.Warn("Filtry", $"Wybierz numer od 1 do {categoryEntries.Count}, albo 0/Enter aby pominąć kategorię.");
                 continue;
             }
 
             return new[] { categoryEntries[n - 1].Code };
         }
+    }
+
+    private static string ReadLineWithArrow()
+    {
+        Console.Write("> ");
+        Console.Out.Flush();
+        return (Console.ReadLine() ?? string.Empty).Trim();
     }
 }
 
@@ -110,54 +107,48 @@ internal static class BidderSearchFiltersPrompt
 /// <summary>Builds the POST body for the bidder auction search API.</summary>
 internal static class BidderSearchRequestFactory
 {
+    private const int PageSize = 20;
+
     public static SearchRequest Create(int pageNumber, BidderSearchFiltersRequest? filters = null)
     {
         var now = DateTime.UtcNow;
-        var threeMonthsAgo = now.AddMonths(-3);
-        var expirationFrom = new DateTime(
-            threeMonthsAgo.Year, threeMonthsAgo.Month, threeMonthsAgo.Day,
-            0, 0, 0, DateTimeKind.Utc);
-
-        var rawCreationTo = now.AddHours(-2);
-        var creationTo = new DateTime(
-            rawCreationTo.Year, rawCreationTo.Month, rawCreationTo.Day,
-            rawCreationTo.Hour, rawCreationTo.Minute, rawCreationTo.Second,
-            DateTimeKind.Utc);
+        var expirationFrom = DateTime.SpecifyKind(now.AddMonths(-3).Date, DateTimeKind.Utc);
+        var creationTo = DateTime.SpecifyKind(now.AddHours(-2), DateTimeKind.Utc);
 
         var request = new SearchRequest
         {
-            auctionItemCode = AuctionItemCode.VEHICLE,
-            pageable = new Pageable
+            AuctionItemCode = AuctionItemCode.VEHICLE,
+            Pageable = new Pageable
             {
-                page = pageNumber,
-                size = 20,
-                sort = new Sort
+                Page = pageNumber,
+                Size = PageSize,
+                Sort = new Sort
                 {
-                    order = new List<Order>
+                    Order = new List<Order>
                     {
-                        new() { name = "auctionStartDate", direction = "DESC" },
+                        new() { Name = "auctionStartDate", Direction = "DESC" },
                     },
                 },
             },
-            page = pageNumber,
-            auctionStatusCodes = new List<AuctionStatusCode>
+            Page = pageNumber,
+            AuctionStatusCodes = new List<AuctionStatusCode>
             {
                 AuctionStatusCode.STARTED,
                 AuctionStatusCode.OVERTIME,
             },
-            expirationDateFrom = expirationFrom,
-            creationDateTo = creationTo,
+            ExpirationDateFrom = expirationFrom,
+            CreationDateTo = creationTo,
         };
 
         if (filters is null)
             return request;
 
         if (!string.IsNullOrWhiteSpace(filters.ProductionYearFrom))
-            request.productionYearFrom = filters.ProductionYearFrom.Trim();
+            request.ProductionYearFrom = filters.ProductionYearFrom.Trim();
         if (!string.IsNullOrWhiteSpace(filters.ProductionYearTo))
-            request.productionYearTo = filters.ProductionYearTo.Trim();
+            request.ProductionYearTo = filters.ProductionYearTo.Trim();
         if (filters.VehicleCategoryCodes is { Count: > 0 })
-            request.vehicleCategoryCodes = filters.VehicleCategoryCodes.ToList();
+            request.VehicleCategoryCodes = filters.VehicleCategoryCodes.ToList();
 
         return request;
     }

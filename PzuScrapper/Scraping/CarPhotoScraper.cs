@@ -1,6 +1,6 @@
 using Microsoft.Playwright;
-using Models;
 using PzuScrapper.Configuration;
+using PzuScrapper.Models;
 
 namespace PzuScrapper.Scraping;
 
@@ -12,16 +12,12 @@ public sealed class CarPhotoScraper
     /// <summary>Working photo folder for a vehicle (VIN or auction number).</summary>
     public static string ResolvePhotoDirectory(Car car)
     {
-        var vin = car.serialNumber?.ToString();
-        var folderName = !string.IsNullOrWhiteSpace(vin) ? vin : car.auctionUniqueNumber ?? "unknown";
-        return Path.Combine(AppPaths.PhotosDirectory, folderName);
+        return Path.Combine(AppPaths.PhotosDirectory, ResolveFolderName(car));
     }
 
     public async Task GetPhotosAsync(IPage page, Car car, HttpClient http)
     {
-        var vin = car.serialNumber?.ToString();
-        var folderName = !string.IsNullOrWhiteSpace(vin) ? vin : car.auctionUniqueNumber ?? "unknown";
-
+        var folderName = ResolveFolderName(car);
         var outputDir = ResolvePhotoDirectory(car);
         Directory.CreateDirectory(outputDir);
 
@@ -37,16 +33,17 @@ public sealed class CarPhotoScraper
 
         var counterText = await page.Locator(CounterSelector).InnerTextAsync();
         var totalPhotos = ParseTotalFromCounter(counterText);
-        Console.WriteLine($"  [{folderName}] W galerii: {totalPhotos} zdjęć.");
-
         var missingCount = CountMissingPhotos(outputDir, totalPhotos);
+
         if (missingCount == 0)
         {
             Console.WriteLine($"  [{folderName}] Komplet ({totalPhotos} szt.) – pomijam galerię.");
             return;
         }
 
-        Console.WriteLine($"  [{folderName}] Brakuje {missingCount}/{totalPhotos} zdjęć – uzupełniam.");
+        Console.WriteLine($"  [{folderName}] W galerii: {totalPhotos} zdjęć, brakuje {missingCount} – uzupełniam.");
+
+        var progress = new PhotoProgress(folderName, totalPhotos);
 
         for (var i = 0; i < totalPhotos; i++)
         {
@@ -55,20 +52,18 @@ public sealed class CarPhotoScraper
                 .GetByRole(AriaRole.Img, new() { Name = "image-large" })
                 .GetAttributeAsync("src");
 
-            if (!string.IsNullOrEmpty(imgSrc))
-            {
-                if (File.Exists(filePath))
-                    Console.WriteLine($"  [{folderName}] {i + 1}/{totalPhotos} – już zapisane.");
-                else
-                {
-                    await DownloadImageAsync(page, http, imgSrc, filePath, folderName, i + 1, totalPhotos);
-                    Console.WriteLine(File.Exists(filePath)
-                        ? $"  [{folderName}] {i + 1}/{totalPhotos} – zapisano."
-                        : $"  [{folderName}] {i + 1}/{totalPhotos} – nie udało się zapisać.");
-                }
-            }
+            if (string.IsNullOrEmpty(imgSrc))
+                progress.OnSkipped(i + 1, "brak podglądu");
+            else if (File.Exists(filePath))
+                progress.OnAlreadySaved(i + 1);
             else
-                Console.WriteLine($"  [{folderName}] {i + 1}/{totalPhotos} – brak podglądu, pomijam.");
+            {
+                var err = await DownloadImageAsync(page, http, imgSrc, filePath);
+                if (err is null && File.Exists(filePath))
+                    progress.OnSaved(i + 1);
+                else
+                    progress.OnError(i + 1, err ?? "nie udało się zapisać");
+            }
 
             if (i < totalPhotos - 1)
             {
@@ -83,6 +78,14 @@ public sealed class CarPhotoScraper
                     new PageWaitForFunctionOptions { Timeout = 10_000 });
             }
         }
+
+        progress.Finish();
+    }
+
+    private static string ResolveFolderName(Car car)
+    {
+        var vin = car.SerialNumber?.ToString();
+        return !string.IsNullOrWhiteSpace(vin) ? vin : car.AuctionUniqueNumber ?? "unknown";
     }
 
     private static int CountMissingPhotos(string outputDir, int totalPhotos)
@@ -100,18 +103,11 @@ public sealed class CarPhotoScraper
         return parts.Length == 2 && int.TryParse(parts[1].Trim(), out var total) ? total : 1;
     }
 
-    private static async Task DownloadImageAsync(
-        IPage page,
-        HttpClient http,
-        string imgSrc,
-        string filePath,
-        string logLabel,
-        int photoIndex,
-        int photoTotal)
+    /// <summary>
+    /// Returns null on success, or an error message on failure (avoids mid-loop prints).
+    /// </summary>
+    private static async Task<string?> DownloadImageAsync(IPage page, HttpClient http, string imgSrc, string filePath)
     {
-        if (File.Exists(filePath))
-            return;
-
         try
         {
             byte[] bytes;
@@ -133,17 +129,80 @@ public sealed class CarPhotoScraper
                     }",
                     imgSrc);
                 if (string.IsNullOrEmpty(b64))
-                    throw new InvalidOperationException("Empty blob decode result.");
+                    return "pusty blob";
                 bytes = Convert.FromBase64String(b64);
             }
             else
                 bytes = await http.GetByteArrayAsync(imgSrc);
 
             await File.WriteAllBytesAsync(filePath, bytes);
+            return null;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"  [{logLabel}] Błąd zapisu zdjęcia {photoIndex}/{photoTotal}: {ex.Message}");
+            return ex.Message;
+        }
+    }
+
+    // ─── Single-line overwriting progress + deferred error summary ──────────
+
+    private sealed class PhotoProgress
+    {
+        private readonly string _folderName;
+        private readonly int _total;
+        private readonly List<string> _errors = new();
+
+        private int _saved;
+        private int _alreadySaved;
+        private int _skipped;
+        private int _errorCount;
+        private int _lastLineLength;
+
+        public PhotoProgress(string folderName, int total)
+        {
+            _folderName = folderName;
+            _total = total;
+        }
+
+        public void OnSaved(int index)        { _saved++;        Render(index, "zapisano"); }
+        public void OnAlreadySaved(int index) { _alreadySaved++; Render(index, "już zapisane"); }
+        public void OnSkipped(int index, string reason)
+        {
+            _skipped++;
+            Render(index, $"pominięto – {reason}");
+        }
+        public void OnError(int index, string reason)
+        {
+            _errorCount++;
+            _errors.Add($"  [{_folderName}] Błąd zdjęcia {index}/{_total}: {reason}");
+            Render(index, "błąd zapisu");
+        }
+
+        public void Finish()
+        {
+            EraseCurrentLine();
+            Console.WriteLine(
+                $"  [{_folderName}] Gotowe {_total}/{_total} – zapisane: {_saved}, już były: {_alreadySaved}, pominięte: {_skipped}, błędy: {_errorCount}.");
+            foreach (var line in _errors)
+                Console.WriteLine(line);
+        }
+
+        private void Render(int index, string status)
+        {
+            var line =
+                $"  [{_folderName}] {index}/{_total} – {status} " +
+                $"(zapisane: {_saved}, już były: {_alreadySaved}, pominięte: {_skipped}, błędy: {_errorCount})";
+
+            var padding = Math.Max(0, _lastLineLength - line.Length);
+            Console.Write('\r' + line + new string(' ', padding));
+            _lastLineLength = line.Length;
+        }
+
+        private void EraseCurrentLine()
+        {
+            if (_lastLineLength == 0) return;
+            Console.Write('\r' + new string(' ', _lastLineLength) + '\r');
+            _lastLineLength = 0;
         }
     }
 }

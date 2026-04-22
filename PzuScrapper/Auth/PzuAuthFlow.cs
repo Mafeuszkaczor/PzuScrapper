@@ -24,24 +24,24 @@ internal sealed class PzuAuthFlow
     {
         var login = new PzuBrowserLogin(_page, _siteSession);
 
-        Console.WriteLine("[Auth] Łączę z usługą…");
+        Log.Info("Auth", "Łączę z usługą…");
         await login.NavigateHomeAndAcceptCookiesAsync();
         await login.OpenMojeKontoMenuAsync();
 
         if (!await login.IsZalogujButtonVisibleAsync())
         {
-            Console.WriteLine("[Auth] Sprawdzam, czy jesteś już zalogowany…");
+            Log.Info("Auth", "Sprawdzam, czy jesteś już zalogowany…");
             return await TryEnsureAuctionSearchViewAsync();
         }
 
-        Console.WriteLine("[Auth] Logowanie…");
+        Log.Info("Auth", "Logowanie…");
         await login.ClickZalogujAsync();
 
         if (await WaitUntilAuctionSearchOrLoginFormAsync(login, TimeSpan.FromSeconds(10)))
         {
             if (IsAuctionSearchUrl(_page.Url))
             {
-                Console.WriteLine("[Auth] Sesja aktywna");
+                Log.Info("Auth", "Sesja aktywna");
                 await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
                 return true;
             }
@@ -55,20 +55,20 @@ internal sealed class PzuAuthFlow
         }
         else
         {
-            Console.WriteLine("[Auth] Czekam na formularz lub zakończenie logowania (to może chwilę potrwać)…");
+            Log.Info("Auth", "Czekam na formularz lub zakończenie logowania (to może chwilę potrwać)…");
         }
 
-        Console.WriteLine("[Auth] Sprawdzam dostęp do listy ofert…");
+        Log.Info("Auth", "Sprawdzam dostęp do listy ofert…");
         try
         {
             await _page.WaitForURLAsync(SearchUrlPattern, new PageWaitForURLOptions { Timeout = 20_000 });
             await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-            Console.WriteLine("[Auth] Zalogowano!");
+            Log.Info("Auth", "Zalogowano!");
             return true;
         }
         catch (TimeoutException)
         {
-            Console.WriteLine("[Auth] Błąd: nie udało się otworzyć listy ofert. Sprawdź logowanie lub spróbuj ponownie.");
+            Log.Error("Auth", "Nie udało się otworzyć listy ofert. Sprawdź logowanie lub spróbuj ponownie.");
             return false;
         }
     }
@@ -86,7 +86,7 @@ internal sealed class PzuAuthFlow
             await _page.WaitForTimeoutAsync(1000);
             if (IsAuctionSearchUrl(_page.Url))
             {
-                Console.WriteLine("[Auth] Sesja aktywna, kontynuuję.");
+                Log.Info("Auth", "Sesja aktywna, kontynuuję.");
                 return true;
             }
         }
@@ -94,7 +94,7 @@ internal sealed class PzuAuthFlow
         {
         }
 
-        Console.WriteLine("[Auth] Nie udało się otworzyć listy ofert. Możesz zalogować się ręcznie w oknie przeglądarki i uruchomić program ponownie.");
+        Log.Error("Auth", "Nie udało się otworzyć listy ofert. Możesz zalogować się ręcznie w oknie przeglądarki i uruchomić program ponownie.");
         return false;
     }
 

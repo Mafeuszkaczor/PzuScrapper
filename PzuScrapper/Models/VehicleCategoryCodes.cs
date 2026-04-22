@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-
-namespace Models;
+﻿namespace PzuScrapper.Models;
 
 /// <summary>Vehicle category codes to human-readable labels (API filters / console prompts).</summary>
 public static class VehicleCategoryCodes

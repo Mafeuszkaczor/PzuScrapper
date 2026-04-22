@@ -1,18 +1,13 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using Models;
+using PzuScrapper.Configuration;
+using PzuScrapper.Models;
 
 namespace PzuScrapper.Search;
 
 internal sealed class AuctionSearchService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
-    private static readonly JsonSerializerOptions RequestJsonOptions = new()
-    {
-        Converters = { new JsonStringEnumConverter(), new UtcIsoDateTimeConverter() },
-    };
+    private const string SearchEndpoint = "/api/auction/auction/search/bidder";
 
     private readonly HttpClient _http;
     private readonly BidderSearchFiltersRequest? _filters;
@@ -23,8 +18,8 @@ internal sealed class AuctionSearchService
         _filters = filters;
     }
 
-    /// <param name="alreadyHaveAuctionNumbers">IDs already saved — pagination stops early when a full page is duplicates.</param>
-    public async Task<List<Car>> SearchAllCarsAsync(ISet<string>? alreadyHaveAuctionNumbers = null)
+    /// <param name="alreadyKnownAuctionNumbers">IDs already saved — pagination stops early when a full page is duplicates.</param>
+    public async Task<List<Car>> SearchAllCarsAsync(ISet<string>? alreadyKnownAuctionNumbers = null)
     {
         var allCars = new List<Car>();
         var seenThisRun = new HashSet<string>(StringComparer.Ordinal);
@@ -33,24 +28,20 @@ internal sealed class AuctionSearchService
 
         do
         {
-            var searchResponse = await FetchPageAsync(currentPage, allCars.Count);
-            if (searchResponse is null)
+            var response = await FetchPageAsync(currentPage, allCars.Count);
+            if (response is null)
                 return allCars;
 
-            var pageRows = searchResponse.result;
-            var pageCount = pageRows?.Count ?? 0;
-            var addedBeforePage = allCars.Count;
+            var pageRows = response.Result ?? new List<Car>();
+            var addedBefore = allCars.Count;
 
-            if (pageRows is { Count: > 0 })
-            {
-                AddNewCarsFromPage(pageRows, alreadyHaveAuctionNumbers, seenThisRun, allCars);
-                if (IsPageFullyKnown(pageRows, alreadyHaveAuctionNumbers))
-                    return allCars;
-            }
+            AddNewCarsFromPage(pageRows, alreadyKnownAuctionNumbers, seenThisRun, allCars);
 
-            totalPages = searchResponse.totalPages;
-            var newThisPage = allCars.Count - addedBeforePage;
-            WriteProgressLine(pageCount, newThisPage, allCars.Count);
+            if (IsPageFullyKnown(pageRows, alreadyKnownAuctionNumbers))
+                return allCars;
+
+            totalPages = response.TotalPages;
+            WriteProgressLine(pageRows.Count, newThisPage: allCars.Count - addedBefore, totalCollected: allCars.Count);
             currentPage++;
         }
         while (currentPage < totalPages);
@@ -59,80 +50,77 @@ internal sealed class AuctionSearchService
         return allCars;
     }
 
-    private static void WriteProgressLine(int pageCount, int newThisPage, int totalCollected)
+    private async Task<SearchResponse?> FetchPageAsync(int pageNumber, int alreadyCollected)
     {
-        var line = $"[Scrape] Pobrano {pageCount} pozycji, nowych w tej partii: {newThisPage} (łącznie zebranych: {totalCollected}).";
-        var width = Console.WindowWidth < 8 ? 120 : Console.WindowWidth;
-        Console.Write($"\r{line}{new string(' ', Math.Max(0, width - 1 - line.Length))}");
-    }
-
-    private async Task<SearchResponse?> FetchPageAsync(int currentPage, int alreadyCollected)
-    {
-        var request = BidderSearchRequestFactory.Create(currentPage, _filters);
-        var json = JsonSerializer.Serialize(request, RequestJsonOptions);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        var request = BidderSearchRequestFactory.Create(pageNumber, _filters);
+        var body = JsonSerializer.Serialize(request, PzuJsonOptions.Write);
+        var content = new StringContent(body, Encoding.UTF8, "application/json");
 
         try
         {
-            using var response = await _http.PostAsync("/api/auction/auction/search/bidder", content);
+            using var response = await _http.PostAsync(SearchEndpoint, content);
             if (!response.IsSuccessStatusCode)
             {
-                Console.WriteLine(
-                    $"\n[Scrape] Serwer zwrócił błąd (kod {(int)response.StatusCode}). " +
-                    $"Zatrzymuję pobieranie — zebrano już {alreadyCollected} pozycji.");
+                Log.Error("Scrape", $"Serwer zwrócił kod {(int)response.StatusCode}. Zatrzymuję — zebrano {alreadyCollected}.");
                 return null;
             }
 
-            var responseJson = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<SearchResponse>(responseJson, JsonOptions);
+            var json = await response.Content.ReadAsStringAsync();
+            return JsonSerializer.Deserialize<SearchResponse>(json, PzuJsonOptions.Read);
         }
         catch (HttpRequestException ex)
         {
-            Console.WriteLine(
-                $"\n[Scrape] Problem z połączeniem sieciowym. Zatrzymuję pobieranie — zebrano {alreadyCollected} pozycji. ({ex.Message})");
+            Log.Error("Scrape", $"Problem sieciowy ({ex.Message}). Zebrano {alreadyCollected}.");
             return null;
         }
         catch (TaskCanceledException)
         {
-            Console.WriteLine(
-                $"\n[Scrape] Przekroczono czas oczekiwania. Zatrzymuję pobieranie — zebrano {alreadyCollected} pozycji.");
+            Log.Error("Scrape", $"Przekroczono czas oczekiwania. Zebrano {alreadyCollected}.");
             return null;
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            Console.WriteLine(
-                $"\n[Scrape] Nie udało się odczytać odpowiedzi serwera. Zatrzymuję pobieranie — zebrano {alreadyCollected} pozycji.");
+            Log.Error("Scrape", $"Nie udało się odczytać odpowiedzi ({ex.Message}). Zebrano {alreadyCollected}.");
             return null;
         }
     }
 
     private static void AddNewCarsFromPage(
         IEnumerable<Car> pageRows,
-        ISet<string>? alreadyHaveAuctionNumbers,
+        ISet<string>? alreadyKnown,
         ISet<string> seenThisRun,
         ICollection<Car> output)
     {
         foreach (var car in pageRows)
         {
-            var id = car.auctionUniqueNumber?.Trim();
+            var id = car.AuctionUniqueNumber?.Trim();
             if (string.IsNullOrEmpty(id)) continue;
-            if (alreadyHaveAuctionNumbers != null && alreadyHaveAuctionNumbers.Contains(id)) continue;
+            if (alreadyKnown is not null && alreadyKnown.Contains(id)) continue;
             if (!seenThisRun.Add(id)) continue;
+
             output.Add(car);
         }
     }
 
-    private static bool IsPageFullyKnown(IEnumerable<Car> pageRows, ISet<string>? alreadyHaveAuctionNumbers)
+    private static bool IsPageFullyKnown(IReadOnlyCollection<Car> pageRows, ISet<string>? alreadyKnown)
     {
-        if (alreadyHaveAuctionNumbers is null) return false;
+        if (alreadyKnown is null || pageRows.Count == 0) return false;
 
-        var withId = pageRows.Where(c => !string.IsNullOrWhiteSpace(c.auctionUniqueNumber)).ToList();
+        var withId = pageRows
+            .Where(c => !string.IsNullOrWhiteSpace(c.AuctionUniqueNumber))
+            .ToList();
+
         if (withId.Count == 0) return false;
+        if (!withId.All(c => alreadyKnown.Contains(c.AuctionUniqueNumber!.Trim()))) return false;
 
-        if (!withId.All(c => alreadyHaveAuctionNumbers.Contains(c.auctionUniqueNumber!.Trim())))
-            return false;
-
-        Console.WriteLine("\n[Scrape] Wszystkie pozycje w tej partii wyników są już zapisane – kończę pobieranie listy.");
+        Log.Info("Scrape", "Wszystkie pozycje w tej partii są już zapisane — kończę pobieranie listy.");
         return true;
+    }
+
+    private static void WriteProgressLine(int pageCount, int newThisPage, int totalCollected)
+    {
+        var line = $"[Scrape] Pobrano {pageCount} pozycji, nowych: {newThisPage} (razem: {totalCollected}).";
+        var width = Console.WindowWidth < 8 ? 120 : Console.WindowWidth;
+        Console.Write($"\r{line}{new string(' ', Math.Max(0, width - 1 - line.Length))}");
     }
 }

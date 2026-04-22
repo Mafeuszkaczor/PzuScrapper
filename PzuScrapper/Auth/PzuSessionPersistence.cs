@@ -22,13 +22,13 @@ internal sealed class PzuSessionPersistence
             return options;
 
         options.StorageStatePath = Path.GetFullPath(_path);
-        Console.WriteLine("[Session] Wczytano zapisane logowanie.");
+        Log.Info("Session", "Wczytano zapisane logowanie.");
         return options;
     }
 
     public async Task SaveAsync(IBrowserContext context)
     {
         await context.StorageStateAsync(new BrowserContextStorageStateOptions { Path = _path });
-        Console.WriteLine("[Session] Zapisano logowanie na przyszłe uruchomienia.");
+        Log.Info("Session", "Zapisano logowanie na przyszłe uruchomienia.");
     }
 }

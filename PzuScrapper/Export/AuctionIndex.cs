@@ -1,48 +1,56 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace PzuScrapper.Export;
 
+/// <summary>Entry persisted in cars.jsonl: which auction was scraped and when.</summary>
+internal sealed record AuctionEntry(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("scrapedOn")] string? ScrapedOn)
+{
+    public DateOnly ScrapedOnDate =>
+        DateOnly.TryParseExact(ScrapedOn, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+            ? d
+            : DateOnly.MinValue; // legacy entries without date → always treated as "not today"
+}
+
 /// <summary>
-/// Persists processed auction IDs for deduplication across runs.
+/// Persists processed auction IDs (+ scrape date) for deduplication across runs.
 /// Full car data lives in the API; photos in the photos directory.
 /// </summary>
 internal static class AuctionIndex
 {
-    private record AuctionEntry([property: JsonPropertyName("id")] string Id);
-
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
-    public static HashSet<string> LoadAuctionNumbers(string filePath)
+    public static IReadOnlyList<AuctionEntry> LoadEntries(string filePath)
     {
-        var set = new HashSet<string>(StringComparer.Ordinal);
         if (!File.Exists(filePath))
-            return set;
+            return [];
 
+        var list = new List<AuctionEntry>();
         try
         {
             foreach (var line in File.ReadLines(filePath))
             {
                 var entry = ParseLine(line);
                 if (entry is not null)
-                    set.Add(entry.Id);
+                    list.Add(entry);
             }
         }
         catch
         {
             // Locked or corrupt file — treat as empty.
         }
-
-        return set;
+        return list;
     }
 
-    public static void AppendAuctionNumbers(string filePath, IEnumerable<string> ids)
+    public static void AppendEntries(string filePath, IEnumerable<AuctionEntry> newEntries)
     {
-        var existing = LoadAuctionNumbers(filePath);
-        var toAppend = ids
-            .Select(id => id.Trim())
-            .Where(id => !string.IsNullOrEmpty(id) && existing.Add(id))
-            .Select(id => new AuctionEntry(id))
+        var existingIds = LoadEntries(filePath).Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+        var toAppend = newEntries
+            .Where(e => !string.IsNullOrWhiteSpace(e.Id) && existingIds.Add(e.Id.Trim()))
+            .Select(e => e with { Id = e.Id.Trim() })
             .ToList();
 
         if (toAppend.Count == 0)
@@ -57,7 +65,18 @@ internal static class AuctionIndex
         foreach (var entry in toAppend)
             writer.WriteLine(JsonSerializer.Serialize(entry, JsonOptions));
 
-        Console.WriteLine($"[Scrape] Dopisano {toAppend.Count} nowych wpisów do {Path.GetFileName(filePath)}.");
+        Log.Info("Scrape", $"Dopisano {toAppend.Count} nowych wpisów do {Path.GetFileName(filePath)}.");
+    }
+
+    public static void Clear(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            Log.Info("Ustawienia", $"Plik {Path.GetFileName(filePath)} nie istnieje — nic do wyczyszczenia.");
+            return;
+        }
+        File.Delete(filePath);
+        Log.Info("Ustawienia", $"Usunięto plik {Path.GetFileName(filePath)}.");
     }
 
     private static AuctionEntry? ParseLine(string line)
@@ -72,7 +91,7 @@ internal static class AuctionIndex
         {
             // Fallback: plain-text ID from old format
             var id = line.Trim();
-            return string.IsNullOrEmpty(id) ? null : new AuctionEntry(id);
+            return string.IsNullOrEmpty(id) ? null : new AuctionEntry(id, ScrapedOn: null);
         }
     }
 }

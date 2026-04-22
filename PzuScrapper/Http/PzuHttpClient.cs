@@ -58,6 +58,10 @@ internal static class PzuHttpClient
         string? userUuid = null)
     {
         var bearerToken = await ReadTokenFromPageAsync(page);
+        if (bearerToken is null)
+            Log.Warn("Scrape", "nie udało się odczytać uprawnień z przeglądarki. Lista ofert może być niepełna.");
+        else
+            Log.Info("Scrape", "Połączenie z listą ofert gotowe.");
 
         var handler = new HttpClientHandler { UseCookies = false };
         var http = new HttpClient(handler) { BaseAddress = BaseUri };
@@ -69,19 +73,38 @@ internal static class PzuHttpClient
         if (!string.IsNullOrEmpty(userUuid))
             http.DefaultRequestHeaders.Add("baggage-user-uuid", userUuid);
 
+        await ApplyCookiesAsync(http, context);
+
+        return http;
+    }
+
+    /// <summary>
+    /// Re-reads token and cookies from the live browser context and updates the client headers.
+    /// Called before every authenticated request; intentionally silent.
+    /// </summary>
+    public static async Task RefreshAsync(HttpClient http, IPage page, IBrowserContext context)
+    {
+        var bearerToken = await ReadTokenFromPageAsync(page);
+        if (!string.IsNullOrEmpty(bearerToken))
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", bearerToken);
+
+        http.DefaultRequestHeaders.Remove("Cookie");
+        await ApplyCookiesAsync(http, context);
+    }
+
+    private static async Task ApplyCookiesAsync(HttpClient http, IBrowserContext context)
+    {
         var cookies = await context.CookiesAsync(new[] { "https://ppo.pzu.pl" });
         if (cookies.Count > 0)
         {
             var cookieHeader = string.Join("; ", cookies.Select(c => $"{c.Name}={c.Value}"));
             http.DefaultRequestHeaders.Add("Cookie", cookieHeader);
         }
-
-        return http;
     }
 
-    private static async Task<string?> ReadTokenFromPageAsync(IPage page)
-    {
-        var token = await page.EvaluateAsync<string?>(@"() => {
+    private static Task<string?> ReadTokenFromPageAsync(IPage page) =>
+        page.EvaluateAsync<string?>(@"() => {
             const knownKeys = ['token', 'refresh'];
             for (const key of knownKeys) {
                 const val = sessionStorage.getItem(key);
@@ -94,13 +117,4 @@ internal static class PzuHttpClient
             }
             return null;
         }");
-
-        if (token == null)
-            Console.WriteLine(
-                "[Scrape] Ostrzeżenie: nie udało się odczytać uprawnień z przeglądarki. Lista ofert może być niepełna.");
-        else
-            Console.WriteLine("[Scrape] Połączenie z listą ofert gotowe.");
-
-        return token;
-    }
 }

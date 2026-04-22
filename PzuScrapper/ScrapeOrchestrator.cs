@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Playwright;
-using Models;
 using PzuScrapper.Auth;
 using PzuScrapper.Configuration;
 using PzuScrapper.Export;
@@ -16,6 +15,29 @@ namespace PzuScrapper;
 /// </summary>
 public sealed class ScrapeOrchestrator
 {
+    // Nadpisuje typowe markery, po których anti-bot (Secfense) wykrywa headless/Playwright.
+    private const string AntiDetectInitScript = """
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['pl-PL', 'pl', 'en-US', 'en'] });
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [
+                { name: 'PDF Viewer' },
+                { name: 'Chrome PDF Viewer' },
+                { name: 'Chromium PDF Viewer' },
+                { name: 'Microsoft Edge PDF Viewer' },
+                { name: 'WebKit built-in PDF' },
+            ],
+        });
+        window.chrome = window.chrome || { runtime: {} };
+        const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+        if (originalQuery) {
+            window.navigator.permissions.query = (parameters) =>
+                parameters.name === 'notifications'
+                    ? Promise.resolve({ state: Notification.permission })
+                    : originalQuery(parameters);
+        }
+        """;
+
     private readonly SiteSession _siteSession;
     private readonly PzuSessionPersistence _sessionPersistence;
     private readonly BidderSearchFiltersRequest? _searchFilters;
@@ -33,15 +55,35 @@ public sealed class ScrapeOrchestrator
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync(
-            new BrowserTypeLaunchOptions { Headless = false });
 
-        Console.WriteLine("[Scrape] Otwieram przeglądarkę…");
-        var context = await browser.NewContextAsync(_sessionPersistence.BuildNewContextOptions());
+        // Headless z "nowym" trybem (udaje prawdziwego Chrome'a) + anti-detect init script
+        // nadpisujący najpopularniejsze markery automatyzacji (navigator.webdriver, plugins, itd.).
+        // Bez tego Secfense blokuje sesję.
+        await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true,
+            Args = new[]
+            {
+                "--headless=new",
+                "--disable-blink-features=AutomationControlled",
+            },
+        });
+
+        Log.Info("Scrape", "Otwieram przeglądarkę…");
+
+        // Realistyczne UA/locale/viewport — headless domyślnie ma "HeadlessChrome" w UA i 800x600.
+        var contextOptions = _sessionPersistence.BuildNewContextOptions();
+        contextOptions.UserAgent ??= "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+        contextOptions.Locale ??= "pl-PL";
+        contextOptions.TimezoneId ??= "Europe/Warsaw";
+        contextOptions.ViewportSize ??= new ViewportSize { Width = 1366, Height = 768 };
+
+        var context = await browser.NewContextAsync(contextOptions);
+        await context.AddInitScriptAsync(AntiDetectInitScript);
+
         var page = await context.NewPageAsync();
 
         using var baggageCapture = new BaggageHeaderCapture(page);
-
         if (!await new PzuAuthFlow(page, _siteSession).EstablishSessionAsync())
             return;
 
@@ -49,39 +91,61 @@ public sealed class ScrapeOrchestrator
 
         var userUuid = await baggageCapture.WaitAsync(TimeSpan.FromSeconds(5));
         if (userUuid is null)
-            Console.WriteLine("[Scrape] Ostrzeżenie: nie udało się odczytać baggage-user-uuid — API może zwracać 401.");
+            Log.Warn("Scrape", "nie udało się odczytać baggage-user-uuid — API może zwracać 401.");
         else
-            Console.WriteLine("[Scrape] Nagłówek baggage-user-uuid odczytany.");
+            Log.Info("Scrape", "Nagłówek baggage-user-uuid odczytany.");
 
         using var http = await PzuHttpClient.CreateAsync(page, context, userUuid);
 
         var newCars = await FetchAndPersistNewCarsAsync(http);
-        await GetCarsAsync(page, http, newCars, cancellationToken);
 
-        Console.WriteLine("[Scrape] Gotowe.");
+        await ProcessNewCarsAsync(page, context, http, newCars, cancellationToken);
+        await PzuHttpClient.RefreshAsync(http, page, context);
+        await RecoverOrphanedPhotosAsync(http, newCars, cancellationToken);
+
+        Log.Info("Scrape", "Gotowe.");
     }
+
+    // ─── Phases ────────────────────────────────────────────────────────────
 
     private async Task<List<Car>> FetchAndPersistNewCarsAsync(HttpClient http)
     {
         var jsonlPath = AppPaths.CarsJsonLinesPath;
-        var knownIds = AuctionIndex.LoadAuctionNumbers(jsonlPath);
-        Console.WriteLine($"[Scrape] Plik {Path.GetFileName(jsonlPath)} — zapisanych ID: {knownIds.Count}.");
+        var entries = AuctionIndex.LoadEntries(jsonlPath);
+        var today = DateOnly.FromDateTime(DateTime.Today);
 
-        Console.WriteLine("[Scrape] Pobieram listę ofert (pomijam już zapisane)…");
+        // Entries from today whose PDF was deleted → re-scrape them.
+        // Older entries are always skipped (past days don't need regeneration).
+        var knownIds = entries
+            .Where(e => e.ScrapedOnDate != today || File.Exists(AppPaths.PdfPathForAuction(e.Id)))
+            .Select(e => e.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var todayMissingPdf = entries.Count(e => e.ScrapedOnDate == today && !File.Exists(AppPaths.PdfPathForAuction(e.Id)));
+        Log.Info("Scrape", $"Plik {Path.GetFileName(jsonlPath)} — zapisanych ID: {entries.Count} (do ponownego przetworzenia z dziś: {todayMissingPdf}).");
+
+        Log.Info("Scrape", "Pobieram listę ofert (pomijam już zapisane)…");
         var newCars = await new AuctionSearchService(http, _searchFilters).SearchAllCarsAsync(knownIds);
-        Console.WriteLine($"[Scrape] Do przetworzenia: {newCars.Count} nowych ofert.");
+        Log.Info("Scrape", $"Do przetworzenia: {newCars.Count} nowych ofert.");
 
-        var newIds = newCars
-            .Select(c => c.auctionUniqueNumber)
+        var newEntries = newCars
+            .Select(c => c.AuctionUniqueNumber)
             .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Cast<string>();
-        AuctionIndex.AppendAuctionNumbers(jsonlPath, newIds);
+            .Select(id => new AuctionEntry(id!.Trim(), today.ToString("yyyy-MM-dd")));
+        AuctionIndex.AppendEntries(jsonlPath, newEntries);
 
         return newCars;
     }
 
-    private static async Task GetCarsAsync(
+    /// <summary>
+    /// Phase 1 — new cars. API call first (while cookies are fresh), then photos.
+    /// PPO rotates MRHSession server-side during each /vehicle-sale navigation, so
+    /// the HttpClient's cookie header goes stale every time photos are downloaded.
+    /// We refresh the HttpClient from the live browser context before each API call.
+    /// </summary>
+    private static async Task ProcessNewCarsAsync(
         IPage page,
+        IBrowserContext context,
         HttpClient client,
         IReadOnlyList<Car> newCars,
         CancellationToken cancellationToken)
@@ -89,43 +153,49 @@ public sealed class ScrapeOrchestrator
         var photoScraper = new CarPhotoScraper();
         var carDataService = new CarDataQueryService(client);
 
-        // Phase 1 — new cars: navigate, download photos, generate PDF.
         for (var i = 0; i < newCars.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var car = newCars[i];
-            if (string.IsNullOrWhiteSpace(car.auctionUniqueNumber))
+            if (string.IsNullOrWhiteSpace(car.AuctionUniqueNumber))
                 continue;
 
-            var auctionNo = car.auctionUniqueNumber.Trim();
+            var auctionNo = car.AuctionUniqueNumber.Trim();
             var pdfPath = AppPaths.PdfPathForAuction(auctionNo);
 
             if (File.Exists(pdfPath))
             {
-                Console.WriteLine($"[Scrape] ({i + 1}/{newCars.Count}) {car.manufacturer} {car.model} — PDF gotowy, pomijam.");
+                Log.Info("Scrape", $"({i + 1}/{newCars.Count}) {car.Manufacturer} {car.Model} — PDF gotowy, pomijam.");
+                continue;
+            }
+
+            Log.Info("Scrape", $"({i + 1}/{newCars.Count}) {car.Manufacturer} {car.Model} — pobieram dane z API…");
+            await PzuHttpClient.RefreshAsync(client, page, context);
+            var carDetails = await carDataService.GetCarDataAsync(auctionNo);
+            if (carDetails is null)
+            {
+                Log.Warn("Scrape", $"Brak danych API dla oferty {auctionNo} — pomijam cały wpis.");
                 continue;
             }
 
             var photoDir = CarPhotoScraper.ResolvePhotoDirectory(car);
-            if (!Directory.Exists(photoDir) || !Directory.EnumerateFiles(photoDir).Any())
+            if (!HasDownloadedPhotos(photoDir))
             {
-                Console.WriteLine($"[Scrape] Zdjęcia ({i + 1}/{newCars.Count}) {car.manufacturer} {car.model}");
+                Log.Info("Scrape", $"Zdjęcia ({i + 1}/{newCars.Count}) {car.Manufacturer} {car.Model}");
                 await page.GotoAsync(
                     PzuPortalUrls.VehicleSaleDetails(auctionNo),
                     new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
                 await photoScraper.GetPhotosAsync(page, car, client);
             }
 
-            await TryGeneratePdfAsync(carDataService, auctionNo, photoDir, pdfPath);
+            await WritePdfAsync(carDetails, auctionNo, photoDir, pdfPath);
         }
-
-        // Phase 2 — recovery: generate PDFs for photos left from interrupted runs.
-        await RecoverOrphanedPhotosAsync(carDataService, newCars, cancellationToken);
     }
 
+    /// <summary>Phase 2 — recovery: generate PDFs for photo folders left from interrupted runs.</summary>
     private static async Task RecoverOrphanedPhotosAsync(
-        CarDataQueryService carDataService,
+        HttpClient client,
         IReadOnlyList<Car> newCars,
         CancellationToken cancellationToken)
     {
@@ -134,24 +204,25 @@ public sealed class ScrapeOrchestrator
             return;
 
         var handledDirs = newCars
-            .Select(c => CarPhotoScraper.ResolvePhotoDirectory(c))
+            .Select(CarPhotoScraper.ResolvePhotoDirectory)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var orphaned = Directory
             .EnumerateDirectories(photosRoot)
-            .Where(dir => !handledDirs.Contains(dir) && Directory.EnumerateFiles(dir).Any())
+            .Where(dir => !handledDirs.Contains(dir) && HasDownloadedPhotos(dir))
             .ToList();
 
         if (orphaned.Count == 0)
             return;
 
-        Console.WriteLine($"[Scrape] Znaleziono {orphaned.Count} folderów ze zdjęciami bez PDF — generuję…");
+        Log.Info("Scrape", $"Znaleziono {orphaned.Count} folderów ze zdjęciami bez PDF — generuję…");
+        var carDataService = new CarDataQueryService(client);
         var recovered = 0;
-        for (var i = 0; i < orphaned.Count; i++)
+
+        foreach (var photoDir in orphaned)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var photoDir = orphaned[i];
             var id = Path.GetFileName(photoDir);
             var pdfPath = AppPaths.PdfPathForAuction(id);
 
@@ -161,14 +232,19 @@ public sealed class ScrapeOrchestrator
                 continue;
             }
 
-            Console.WriteLine($"[Scrape] Odzysk: {id}");
+            Log.Info("Scrape", $"Odzysk: {id}");
             if (await TryGeneratePdfAsync(carDataService, id, photoDir, pdfPath))
                 recovered++;
         }
 
         if (recovered > 0)
-            Console.WriteLine($"[Scrape] Odzyskano {recovered} PDF z poprzednich uruchomień.");
+            Log.Info("Scrape", $"Odzyskano {recovered} PDF z poprzednich uruchomień.");
     }
+
+    // ─── Shared helpers ────────────────────────────────────────────────────
+
+    private static bool HasDownloadedPhotos(string directory) =>
+        Directory.Exists(directory) && Directory.EnumerateFiles(directory).Any();
 
     private static async Task<bool> TryGeneratePdfAsync(
         CarDataQueryService carDataService,
@@ -179,15 +255,55 @@ public sealed class ScrapeOrchestrator
         var carDetails = await carDataService.GetCarDataAsync(auctionNo);
         if (carDetails is null)
         {
-            Console.WriteLine($"[PDF] Brak danych API dla oferty {auctionNo} — pomijam PDF.");
+            Log.Warn("PDF", $"Brak danych API dla oferty {auctionNo} — pomijam PDF.");
             return false;
         }
 
-        if (!CarDetailsPdf.TryWrite(pdfPath, carDetails, photoDir))
-            return false;
+        return await WritePdfAsync(carDetails, auctionNo, photoDir, pdfPath);
+    }
 
-        Console.WriteLine($"[PDF] Zapisano: {pdfPath}");
+    private static async Task<bool> WritePdfAsync(CarDetails carDetails, string auctionNo, string photoDir, string pdfPath)
+    {
+        using var cts = new CancellationTokenSource();
+        var spinner = RunPdfSpinnerAsync(cts.Token);
+
+        var success = await Task.Run(() => CarDetailsPdf.TryWrite(pdfPath, carDetails, photoDir));
+
+        cts.Cancel();
+        await spinner;
+        ClearCurrentConsoleLine();
+
+        if (!success)
+        {
+            Log.Warn("PDF", $"Nie udało się zapisać PDF dla {auctionNo}.");
+            return false;
+        }
+
+        Log.Info("PDF", $"Zapisano: {pdfPath}");
         CarDetailsPdf.TryDeletePhotoDirectory(photoDir);
         return true;
+    }
+
+    private static async Task RunPdfSpinnerAsync(CancellationToken token)
+    {
+        const string prefix = "[PDF] Zapisywanie raportu";
+        var dotCount = 1;
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                var dots = new string('.', dotCount).PadRight(5);
+                Console.Write($"\r{prefix} {dots}");
+                await Task.Delay(300, token);
+                dotCount = dotCount == 5 ? 1 : dotCount + 1;
+            }
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private static void ClearCurrentConsoleLine()
+    {
+        var width = Console.WindowWidth < 8 ? 80 : Console.WindowWidth - 1;
+        Console.Write('\r' + new string(' ', width) + '\r');
     }
 }
