@@ -17,37 +17,6 @@ namespace PzuScrapper;
 /// </summary>
 public sealed class ScrapeOrchestrator
 {
-    // Wymuszenie polskiego UI — z zagranicy PZU często pokazuje angielski mimo --lang.
-    private const string PolishLocale = "pl-PL";
-    private const string PolishTimezone = "Europe/Warsaw";
-    private const string PolishAcceptLanguage = "pl-PL,pl;q=1.0";
-    private const float WarsawLatitude = 52.2297f;
-    private const float WarsawLongitude = 21.0122f;
-
-    // Nadpisuje typowe markery, po których anti-bot (Secfense) wykrywa headless/Playwright.
-    private const string AntiDetectInitScript = """
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'language', { get: () => 'pl-PL' });
-        Object.defineProperty(navigator, 'languages', { get: () => ['pl-PL', 'pl'] });
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [
-                { name: 'PDF Viewer' },
-                { name: 'Chrome PDF Viewer' },
-                { name: 'Chromium PDF Viewer' },
-                { name: 'Microsoft Edge PDF Viewer' },
-                { name: 'WebKit built-in PDF' },
-            ],
-        });
-        window.chrome = window.chrome || { runtime: {} };
-        const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
-        if (originalQuery) {
-            window.navigator.permissions.query = (parameters) =>
-                parameters.name === 'notifications'
-                    ? Promise.resolve({ state: Notification.permission })
-                    : originalQuery(parameters);
-        }
-        """;
-
     private readonly SiteSession _siteSession;
     private readonly PzuSessionPersistence _sessionPersistence;
     private readonly BidderSearchFiltersRequest? _searchFilters;
@@ -71,33 +40,18 @@ public sealed class ScrapeOrchestrator
         {
             Headless = !debug,
             SlowMo = debug ? 100 : 0,
-            Args = new[]
-            {
-                $"--lang={PolishLocale}",
-                "--accept-lang=pl-PL,pl",
-                "--disable-blink-features=AutomationControlled",
-            },
+            Args = PolishBrowserProfile.ChromiumLaunchArgs,
         });
 
         Log.Info("Scrape", debug ? "Otwieram przeglądarkę (DEBUG – widoczne okno)…" : "Otwieram przeglądarkę…");
 
-        // Zawsze wymuszamy PL — nie polegamy na domyślnym locale systemu (np. Mac w Afryce).
         var contextOptions = _sessionPersistence.BuildNewContextOptions();
         contextOptions.UserAgent ??= "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-        contextOptions.Locale = PolishLocale;
-        contextOptions.TimezoneId = PolishTimezone;
-        contextOptions.Geolocation = new Geolocation { Latitude = WarsawLatitude, Longitude = WarsawLongitude };
-        contextOptions.Permissions = ["geolocation"];
+        PolishBrowserProfile.ApplyToContextOptions(contextOptions);
         contextOptions.ViewportSize ??= new ViewportSize { Width = 1366, Height = 768 };
-        var extraHeaders = contextOptions.ExtraHTTPHeaders?
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        extraHeaders["Accept-Language"] = PolishAcceptLanguage;
-        contextOptions.ExtraHTTPHeaders = extraHeaders;
 
         var context = await browser.NewContextAsync(contextOptions);
-        await context.AddInitScriptAsync(AntiDetectInitScript);
-        await TrySetPolishLanguageCookiesAsync(context);
+        await PolishBrowserProfile.ApplyToContextAsync(context);
 
         var page = await context.NewPageAsync();
 
@@ -260,23 +214,6 @@ public sealed class ScrapeOrchestrator
     }
 
     // ─── Shared helpers ────────────────────────────────────────────────────
-
-    private static async Task TrySetPolishLanguageCookiesAsync(IBrowserContext context)
-    {
-        try
-        {
-            await context.AddCookiesAsync(
-            [
-                new Cookie { Name = "lang", Value = "pl", Domain = "ppo.pzu.pl", Path = "/", Secure = true, SameSite = SameSiteAttribute.Lax },
-                new Cookie { Name = "language", Value = "pl", Domain = "ppo.pzu.pl", Path = "/", Secure = true, SameSite = SameSiteAttribute.Lax },
-                new Cookie { Name = "locale", Value = PolishLocale, Domain = "ppo.pzu.pl", Path = "/", Secure = true, SameSite = SameSiteAttribute.Lax },
-            ]);
-        }
-        catch
-        {
-            // best effort — nagłówki i Locale i tak wymuszają PL
-        }
-    }
 
     private static bool HasDownloadedPhotos(string directory) =>
         Directory.Exists(directory) && Directory.EnumerateFiles(directory).Any();

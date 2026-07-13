@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using Microsoft.Playwright;
+using PzuScrapper.Auth;
 
 namespace PzuScrapper.Http;
 
@@ -73,7 +74,7 @@ internal static class PzuHttpClient
         if (!string.IsNullOrEmpty(userUuid))
             http.DefaultRequestHeaders.Add("baggage-user-uuid", userUuid);
 
-        http.DefaultRequestHeaders.AcceptLanguage.ParseAdd("pl-PL,pl;q=1.0");
+        http.DefaultRequestHeaders.AcceptLanguage.ParseAdd(PolishBrowserProfile.AcceptLanguage);
 
         await ApplyCookiesAsync(http, context);
 

@@ -21,8 +21,8 @@ internal sealed class PzuSessionPersistence
         if (!File.Exists(_path))
             return options;
 
-        options.StorageStatePath = Path.GetFullPath(_path);
-        Log.Info("Session", "Wczytano zapisane logowanie.");
+        options.StorageStatePath = Path.GetFullPath(PolishBrowserProfile.PrepareStorageStatePath(_path));
+        Log.Info("Session", "Wczytano zapisane logowanie (język PL).");
         return options;
     }
 
