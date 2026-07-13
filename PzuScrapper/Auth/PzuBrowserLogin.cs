@@ -9,6 +9,7 @@ internal sealed class PzuBrowserLogin
 {
     private const string HomeUrl = "https://ppo.pzu.pl/";
     private const string TwoFactorIframeSelector = "#secfense_iframe";
+    private const int NavigationTimeoutMs = 60_000;
 
     private readonly IPage _page;
     private readonly SiteSession _siteSession;
@@ -31,7 +32,11 @@ internal sealed class PzuBrowserLogin
 
     public async Task NavigateHomeAndAcceptCookiesAsync()
     {
-        await _page.GotoAsync(HomeUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 10_000 });
+        await _page.GotoAsync(HomeUrl, new PageGotoOptions
+        {
+            WaitUntil = WaitUntilState.Load,
+            Timeout = NavigationTimeoutMs,
+        });
         await _page.Locator("body").ClickAsync();
 
         if (await AcceptCookiesButton.IsVisibleAsync())
@@ -41,7 +46,7 @@ internal sealed class PzuBrowserLogin
     public async Task OpenMojeKontoMenuAsync()
     {
         await MojeKontoLink.ClickAsync();
-        await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await _page.WaitForLoadStateAsync(LoadState.Load, new PageWaitForLoadStateOptions { Timeout = NavigationTimeoutMs });
     }
 
     public Task<bool> IsZalogujButtonVisibleAsync() => ZalogujButton.IsVisibleAsync();

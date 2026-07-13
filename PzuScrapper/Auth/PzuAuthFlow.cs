@@ -82,7 +82,7 @@ internal sealed class PzuAuthFlow
         {
             await _page.GotoAsync(
                 "https://ppo.pzu.pl/bidder/auction/search",
-                new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 15_000 });
+                new PageGotoOptions { WaitUntil = WaitUntilState.Load, Timeout = 60_000 });
             await _page.WaitForTimeoutAsync(1000);
             if (IsAuctionSearchUrl(_page.Url))
             {
