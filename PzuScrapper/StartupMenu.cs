@@ -49,6 +49,7 @@ internal static class StartupMenu
             Console.WriteLine();
             Console.WriteLine("--- Ustawienia ---");
             Console.WriteLine(" 1 — wyczyść plik cars.jsonl (rozpocznij od zera)");
+            Console.WriteLine(" 2 — zmień login i hasło PZU");
             Console.WriteLine(" 0 — wróć do menu głównego");
             Console.Write("> ");
             Console.Out.Flush();
@@ -58,6 +59,9 @@ internal static class StartupMenu
             {
                 case "1":
                     ConfirmAndClearCarsFile();
+                    break;
+                case "2":
+                    ChangeCredentials();
                     break;
                 case "0":
                 case "":
@@ -82,5 +86,11 @@ internal static class StartupMenu
             AuctionIndex.Clear(path);
         else
             Log.Info("Ustawienia", "Anulowano.");
+    }
+
+    private static void ChangeCredentials()
+    {
+        if (CredentialsPrompt.PromptAndSave(warnIfOverwriting: true) is not null)
+            Log.Info("Ustawienia", "Od teraz scraper używa nowego loginu.");
     }
 }

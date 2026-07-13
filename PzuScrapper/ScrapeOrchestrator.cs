@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Playwright;
 using PzuScrapper.Auth;
@@ -56,20 +58,19 @@ public sealed class ScrapeOrchestrator
     {
         using var playwright = await Playwright.CreateAsync();
 
-        // Headless z "nowym" trybem (udaje prawdziwego Chrome'a) + anti-detect init script
-        // nadpisujący najpopularniejsze markery automatyzacji (navigator.webdriver, plugins, itd.).
-        // Bez tego Secfense blokuje sesję.
+        var debug = AuthDiagnostics.IsEnabled;
         await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
-            Headless = true,
+            Headless = !debug,
+            SlowMo = debug ? 100 : 0,
             Args = new[]
             {
-                "--headless=new",
+                "--lang=pl-PL",
                 "--disable-blink-features=AutomationControlled",
             },
         });
 
-        Log.Info("Scrape", "Otwieram przeglądarkę…");
+        Log.Info("Scrape", debug ? "Otwieram przeglądarkę (DEBUG – widoczne okno)…" : "Otwieram przeglądarkę…");
 
         // Realistyczne UA/locale/viewport — headless domyślnie ma "HeadlessChrome" w UA i 800x600.
         var contextOptions = _sessionPersistence.BuildNewContextOptions();
@@ -77,6 +78,11 @@ public sealed class ScrapeOrchestrator
         contextOptions.Locale ??= "pl-PL";
         contextOptions.TimezoneId ??= "Europe/Warsaw";
         contextOptions.ViewportSize ??= new ViewportSize { Width = 1366, Height = 768 };
+        var extraHeaders = contextOptions.ExtraHTTPHeaders?
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        extraHeaders["Accept-Language"] = "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7";
+        contextOptions.ExtraHTTPHeaders = extraHeaders;
 
         var context = await browser.NewContextAsync(contextOptions);
         await context.AddInitScriptAsync(AntiDetectInitScript);

@@ -363,8 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 
 # Lokalne sekrety (nadpisują szablony w repozytorium)
-appsettings.*.json
-!appsettings.json
 cookies.*.json
 !cookies.json
 session-storage.*.json

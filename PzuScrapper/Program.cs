@@ -9,10 +9,12 @@ using QuestPDF.Infrastructure;
 
 QuestPDF.Settings.License = LicenseType.Community;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 Log.Info("Konfiguracja", "Start programu.");
-
-AppConfiguration.AddOptionalDevelopmentJson(builder);
 
 // ─── PDF-ONLY MODE (scraping disabled) ───────────────────────────────────
 // Wrzuć plik z JSON-em (pojedynczy obiekt CarDetails, tablica, lub JSONL)
@@ -26,7 +28,10 @@ try
     if (!StartupMenu.Run())
         return;
 
-    var session = AppConfiguration.CreateSiteSession(builder.Configuration);
+    var session = EnsureCredentials();
+    if (session is null)
+        return;
+
     var searchFilters = BidderSearchFiltersPrompt.Read();
     await new ScrapeOrchestrator(session, builder.Environment, searchFilters).RunAsync();
 }
@@ -40,6 +45,19 @@ finally
     Console.WriteLine("Naciśnij Enter, aby zamknąć okno…");
     Console.Out.Flush();
     Console.ReadLine();
+}
+
+static SiteSession? EnsureCredentials()
+{
+    var stored = CredentialsStore.TryLoad();
+    if (stored is not null)
+        return stored;
+
+    Log.Info("Login", "Nie znaleziono zapisanych danych logowania — podaj je raz, zapiszę.");
+    var session = CredentialsPrompt.PromptAndSave(warnIfOverwriting: false);
+    if (session is null)
+        Log.Error("Login", "Bez loginu i hasła nie mogę kontynuować. Wybierz w menu „1 → 2” żeby je ustawić.");
+    return session;
 }
 
 

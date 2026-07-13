@@ -70,7 +70,8 @@ internal static class BidderSearchFiltersPrompt
         while (true)
         {
             Console.WriteLine();
-            Console.WriteLine("[Filtry] Wybierz typ pojazdu — numer z listy, 0 lub Enter = brak filtra");
+            Console.WriteLine("[Filtry] Wybierz typ(y) pojazdu — numery oddzielone spacją (np. 9 8 4).");
+            Console.WriteLine("         0 lub Enter = brak filtra (wszystkie typy).");
             for (var i = 0; i < categoryEntries.Count; i++)
                 Console.WriteLine($" {i + 1} — {categoryEntries[i].Description}");
 
@@ -78,19 +79,41 @@ internal static class BidderSearchFiltersPrompt
             if (string.IsNullOrEmpty(raw) || raw == "0")
                 return null;
 
-            if (!int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var n))
+            var tokens = raw.Split(new[] { ' ', ',', ';', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            var selected = new List<string>();
+            var seen = new HashSet<int>();
+            var valid = true;
+
+            foreach (var token in tokens)
             {
-                Log.Warn("Filtry", "Wpisz liczbę (numer z listy, 0 lub Enter).");
-                continue;
+                if (!int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out var n))
+                {
+                    Log.Warn("Filtry", $"„{token}” to nie jest liczba. Wpisz tylko numery z listy oddzielone spacją.");
+                    valid = false;
+                    break;
+                }
+
+                if (n < 1 || n > categoryEntries.Count)
+                {
+                    Log.Warn("Filtry", $"Numer {n} poza listą. Dozwolone: 1–{categoryEntries.Count}.");
+                    valid = false;
+                    break;
+                }
+
+                if (seen.Add(n))
+                    selected.Add(categoryEntries[n - 1].Code);
             }
 
-            if (n < 1 || n > categoryEntries.Count)
-            {
-                Log.Warn("Filtry", $"Wybierz numer od 1 do {categoryEntries.Count}, albo 0/Enter aby pominąć kategorię.");
+            if (!valid)
                 continue;
-            }
 
-            return new[] { categoryEntries[n - 1].Code };
+            if (selected.Count == 0)
+                return null;
+
+            var chosenNames = selected
+                .Select(code => categoryEntries.First(e => e.Code == code).Description);
+            Log.Info("Filtry", $"Wybrane typy: {string.Join(", ", chosenNames)}.");
+            return selected;
         }
     }
 

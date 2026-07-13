@@ -69,10 +69,14 @@ internal sealed class PzuBrowserLogin
         if (!await WaitForTwoFactorIframeAsync())
         {
             Log.Info("Login", "Brak 2FA.");
+            if (AuthDiagnostics.IsEnabled)
+                await AuthDiagnostics.DumpAsync(_page, "no-2fa-iframe");
             return;
         }
 
         Log.Info("Login", "Wymagana weryfikacja 2FA.");
+        if (AuthDiagnostics.IsEnabled)
+            await AuthDiagnostics.DumpAsync(_page, "2fa-iframe-detected");
         await HandleTwoFactorAsync();
     }
 
@@ -86,6 +90,8 @@ internal sealed class PzuBrowserLogin
         }
         catch (TimeoutException)
         {
+            if (AuthDiagnostics.IsEnabled)
+                await AuthDiagnostics.DumpAsync(_page, "2fa-iframe-timeout");
             return false;
         }
     }
@@ -95,9 +101,43 @@ internal sealed class PzuBrowserLogin
     private async Task HandleTwoFactorAsync()
     {
         var frame = _page.Locator(TwoFactorIframeSelector).ContentFrame;
-        var codeInput = frame.GetByRole(AriaRole.Textbox, new() { Name = "Wprowadź 6-cyfrowy kod z SMS" });
-        var trustBrowser = frame.GetByRole(AriaRole.Checkbox, new() { Name = "Zaufaj tej przeglądarce" });
-        var confirmButton = frame.GetByRole(AriaRole.Button, new() { Name = "ZATWIERDŹ" });
+        var codeInputCandidates = new[]
+        {
+            frame.Locator("#code"),
+            frame.Locator("input[name='code']"),
+            frame.GetByRole(AriaRole.Textbox, new() { Name = "Wprowadź 6-cyfrowy kod z SMS" }),
+            frame.GetByRole(AriaRole.Textbox, new() { Name = "kod z SMS" }),
+            frame.GetByRole(AriaRole.Textbox, new() { Name = "kod" }),
+            frame.GetByPlaceholder("Wprowadź 6-cyfrowy kod z SMS"),
+            frame.Locator("input[autocomplete='one-time-code']"),
+            frame.Locator("input[inputmode='numeric']"),
+            frame.Locator("input[maxlength='6']"),
+            frame.Locator("input[type='tel']"),
+            frame.Locator("input[name*='sms' i]"),
+            frame.Locator("input[placeholder*='kod' i]"),
+        };
+        var trustBrowserCandidates = new[]
+        {
+            frame.Locator("#fprint_state"),
+            frame.Locator("input[name='fprint_state']"),
+            frame.GetByRole(AriaRole.Checkbox, new() { Name = "Zaufaj tej przeglądarce" }),
+            frame.GetByRole(AriaRole.Checkbox, new() { Name = "Zaufaj" }),
+            frame.Locator("input[type='checkbox']"),
+        };
+        var confirmButtonCandidates = new[]
+        {
+            frame.GetByRole(AriaRole.Button, new() { Name = "SUBMIT THE CODE" }),
+            frame.GetByRole(AriaRole.Button, new() { Name = "Submit the code" }),
+            frame.GetByRole(AriaRole.Button, new() { Name = "ZATWIERDŹ" }),
+            frame.GetByRole(AriaRole.Button, new() { Name = "Zatwierdź" }),
+            frame.GetByRole(AriaRole.Button, new() { Name = "Potwierdź" }),
+            frame.Locator("button[type='submit']"),
+            frame.Locator("button:has-text('SUBMIT THE CODE')"),
+            frame.Locator("button:has-text('Submit the code')"),
+            frame.Locator("button:has-text('ZATWIERDŹ')"),
+            frame.Locator("button:has-text('Zatwierdź')"),
+            frame.Locator("button:has-text('Potwierdź')"),
+        };
 
         // Poczekaj aż formularz SMS będzie faktycznie gotowy (nie tylko sam iframe w DOM).
         // Jeśli pole nie pojawi się w 15s, mogą być dwa powody:
@@ -105,7 +145,71 @@ internal sealed class PzuBrowserLogin
         //   (b) PPO używa innej metody (np. push do aplikacji mobilnej).
         try
         {
-            await codeInput.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15_000 });
+            var detectedInput = await WaitForAnyVisibleLocatorAsync(codeInputCandidates, TimeSpan.FromSeconds(15));
+            if (detectedInput is null)
+            {
+                await AuthDiagnostics.DumpAsync(_page, "sms-input-not-visible");
+                throw new TimeoutException("Nie znaleziono widocznego pola kodu SMS.");
+            }
+
+            var codeInput = detectedInput;
+
+            if (AuthDiagnostics.IsEnabled)
+                await AuthDiagnostics.DumpAsync(_page, "sms-input-visible");
+
+            var trustBrowser = await WaitForAnyVisibleLocatorAsync(trustBrowserCandidates, TimeSpan.FromSeconds(2));
+            var confirmButton = await WaitForAnyVisibleLocatorAsync(confirmButtonCandidates, TimeSpan.FromSeconds(5));
+
+            if (confirmButton is null)
+            {
+                await AuthDiagnostics.DumpAsync(_page, "confirm-button-not-visible");
+                throw new TimeoutException("Nie znaleziono przycisku zatwierdzenia 2FA.");
+            }
+
+            const int maxAttempts = 5;
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                var smsCode = ReadSmsCodeFromConsole(attempt, maxAttempts);
+
+                try
+                {
+                    await codeInput.ClickAsync();
+                    await _page.WaitForTimeoutAsync(150);
+                    await codeInput.FillAsync(smsCode);
+                    await _page.WaitForTimeoutAsync(150);
+                    if (trustBrowser is not null)
+                    {
+                        try
+                        {
+                            await trustBrowser.CheckAsync();
+                        }
+                        catch (PlaywrightException)
+                        {
+                            // Checkbox bywa niestandardowy lub chwilowo zablokowany — nie blokuj logowania.
+                        }
+                        await _page.WaitForTimeoutAsync(150);
+                    }
+                    await confirmButton.ClickAsync();
+                }
+                catch (TimeoutException ex)
+                {
+                    Log.Warn("2FA", $"Element nie był dostępny: {ex.Message}. Ponawiam formularz…");
+                    continue;
+                }
+                catch (PlaywrightException ex)
+                {
+                    Log.Warn("2FA", $"Playwright nie zdążył: {ex.Message}. Ponawiam formularz…");
+                    continue;
+                }
+
+                if (await WaitForTwoFactorResultAsync(codeInput, TimeSpan.FromSeconds(10)))
+                    return;
+
+                if (attempt == maxAttempts)
+                    Log.Warn("2FA", "Przekroczono limit prób weryfikacji 2FA.");
+                else
+                    Log.Warn("2FA", "Nieprawidłowy kod – spróbuj jeszcze raz.");
+            }
         }
         catch (TimeoutException)
         {
@@ -116,44 +220,33 @@ internal sealed class PzuBrowserLogin
             }
 
             Log.Info("2FA", "Pole SMS nie pojawiło się — czekam na zatwierdzenie innym sposobem (np. push w aplikacji, do 2 min)…");
+            await AuthDiagnostics.DumpAsync(_page, "push-wait-fallback");
             await WaitForTwoFactorToVanishAsync(TimeSpan.FromMinutes(2));
-            return;
         }
+    }
 
-        const int maxAttempts = 5;
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+    private static async Task<ILocator?> WaitForAnyVisibleLocatorAsync(IEnumerable<ILocator> locators, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
         {
-            var smsCode = ReadSmsCodeFromConsole(attempt, maxAttempts);
-
-            try
+            foreach (var locator in locators)
             {
-                await codeInput.ClickAsync();
-                await _page.WaitForTimeoutAsync(150);
-                await codeInput.FillAsync(smsCode);
-                await _page.WaitForTimeoutAsync(150);
-                await trustBrowser.CheckAsync();
-                await _page.WaitForTimeoutAsync(150);
-                await confirmButton.ClickAsync();
-            }
-            catch (TimeoutException ex)
-            {
-                Log.Warn("2FA", $"Element nie był dostępny: {ex.Message}. Ponawiam formularz…");
-                continue;
-            }
-            catch (PlaywrightException ex)
-            {
-                Log.Warn("2FA", $"Playwright nie zdążył: {ex.Message}. Ponawiam formularz…");
-                continue;
+                try
+                {
+                    if (await locator.IsVisibleAsync())
+                        return locator;
+                }
+                catch (PlaywrightException)
+                {
+                    // Iframe/DOM może się przebudowywać podczas challenge'u 2FA.
+                }
             }
 
-            if (await WaitForTwoFactorResultAsync(codeInput, TimeSpan.FromSeconds(10)))
-                return;
-
-            if (attempt == maxAttempts)
-                Log.Warn("2FA", "Przekroczono limit prób weryfikacji 2FA.");
-            else
-                Log.Warn("2FA", "Nieprawidłowy kod – spróbuj jeszcze raz.");
+            await Task.Delay(250);
         }
+
+        return null;
     }
 
     /// <summary>
