@@ -73,6 +73,8 @@ internal static class PzuHttpClient
         if (!string.IsNullOrEmpty(userUuid))
             http.DefaultRequestHeaders.Add("baggage-user-uuid", userUuid);
 
+        http.DefaultRequestHeaders.AcceptLanguage.ParseAdd("pl-PL,pl;q=1.0");
+
         await ApplyCookiesAsync(http, context);
 
         return http;

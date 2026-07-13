@@ -20,13 +20,38 @@ internal sealed class PzuBrowserLogin
         _siteSession = siteSession;
     }
 
-    // ─── Page locators (one place, descriptive names) ──────────────────────
+    // ─── Page locators (PL priorytet + EN fallback przy UI zagranicznym) ───
 
-    private ILocator AcceptCookiesButton => _page.GetByRole(AriaRole.Button, new() { Name = "Akceptuj wszystkie" });
-    private ILocator MojeKontoLink => _page.Locator("a").Filter(new() { HasText = "Moje konto" });
-    private ILocator ZalogujButton => _page.GetByRole(AriaRole.Button, new() { Name = "Zaloguj" });
-    private ILocator UserTextbox => _page.GetByRole(AriaRole.Textbox, new() { Name = "Użytkownik" });
-    private ILocator PasswordTextbox => _page.GetByRole(AriaRole.Textbox, new() { Name = "Hasło" });
+    private ILocator AcceptCookiesButton => RoleButton("Akceptuj wszystkie", "Accept all");
+    private ILocator MojeKontoLink => LinkWithText("Moje konto", "My account");
+    private ILocator ZalogujButton => RoleButton("Zaloguj", "Log in", "Sign in");
+    private ILocator UserTextbox => RoleTextbox("Użytkownik", "User", "Username");
+    private ILocator PasswordTextbox => RoleTextbox("Hasło", "Password");
+
+    private ILocator RoleButton(params string[] names) => CombineByRole(AriaRole.Button, names);
+    private ILocator RoleTextbox(params string[] names) => CombineByRole(AriaRole.Textbox, names);
+
+    private ILocator CombineByRole(AriaRole role, params string[] names)
+    {
+        ILocator? combined = null;
+        foreach (var name in names)
+        {
+            var locator = _page.GetByRole(role, new() { Name = name });
+            combined = combined is null ? locator : combined.Or(locator);
+        }
+        return combined!;
+    }
+
+    private ILocator LinkWithText(params string[] texts)
+    {
+        ILocator? combined = null;
+        foreach (var text in texts)
+        {
+            var locator = _page.Locator("a").Filter(new() { HasText = text });
+            combined = combined is null ? locator : combined.Or(locator);
+        }
+        return combined!;
+    }
 
     // ─── Steps ─────────────────────────────────────────────────────────────
 

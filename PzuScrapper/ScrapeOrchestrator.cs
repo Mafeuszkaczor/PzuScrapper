@@ -17,10 +17,18 @@ namespace PzuScrapper;
 /// </summary>
 public sealed class ScrapeOrchestrator
 {
+    // Wymuszenie polskiego UI — z zagranicy PZU często pokazuje angielski mimo --lang.
+    private const string PolishLocale = "pl-PL";
+    private const string PolishTimezone = "Europe/Warsaw";
+    private const string PolishAcceptLanguage = "pl-PL,pl;q=1.0";
+    private const float WarsawLatitude = 52.2297f;
+    private const float WarsawLongitude = 21.0122f;
+
     // Nadpisuje typowe markery, po których anti-bot (Secfense) wykrywa headless/Playwright.
     private const string AntiDetectInitScript = """
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'languages', { get: () => ['pl-PL', 'pl', 'en-US', 'en'] });
+        Object.defineProperty(navigator, 'language', { get: () => 'pl-PL' });
+        Object.defineProperty(navigator, 'languages', { get: () => ['pl-PL', 'pl'] });
         Object.defineProperty(navigator, 'plugins', {
             get: () => [
                 { name: 'PDF Viewer' },
@@ -65,27 +73,31 @@ public sealed class ScrapeOrchestrator
             SlowMo = debug ? 100 : 0,
             Args = new[]
             {
-                "--lang=pl-PL",
+                $"--lang={PolishLocale}",
+                "--accept-lang=pl-PL,pl",
                 "--disable-blink-features=AutomationControlled",
             },
         });
 
         Log.Info("Scrape", debug ? "Otwieram przeglądarkę (DEBUG – widoczne okno)…" : "Otwieram przeglądarkę…");
 
-        // Realistyczne UA/locale/viewport — headless domyślnie ma "HeadlessChrome" w UA i 800x600.
+        // Zawsze wymuszamy PL — nie polegamy na domyślnym locale systemu (np. Mac w Afryce).
         var contextOptions = _sessionPersistence.BuildNewContextOptions();
         contextOptions.UserAgent ??= "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-        contextOptions.Locale ??= "pl-PL";
-        contextOptions.TimezoneId ??= "Europe/Warsaw";
+        contextOptions.Locale = PolishLocale;
+        contextOptions.TimezoneId = PolishTimezone;
+        contextOptions.Geolocation = new Geolocation { Latitude = WarsawLatitude, Longitude = WarsawLongitude };
+        contextOptions.Permissions = ["geolocation"];
         contextOptions.ViewportSize ??= new ViewportSize { Width = 1366, Height = 768 };
         var extraHeaders = contextOptions.ExtraHTTPHeaders?
             .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        extraHeaders["Accept-Language"] = "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7";
+        extraHeaders["Accept-Language"] = PolishAcceptLanguage;
         contextOptions.ExtraHTTPHeaders = extraHeaders;
 
         var context = await browser.NewContextAsync(contextOptions);
         await context.AddInitScriptAsync(AntiDetectInitScript);
+        await TrySetPolishLanguageCookiesAsync(context);
 
         var page = await context.NewPageAsync();
 
@@ -248,6 +260,23 @@ public sealed class ScrapeOrchestrator
     }
 
     // ─── Shared helpers ────────────────────────────────────────────────────
+
+    private static async Task TrySetPolishLanguageCookiesAsync(IBrowserContext context)
+    {
+        try
+        {
+            await context.AddCookiesAsync(
+            [
+                new Cookie { Name = "lang", Value = "pl", Domain = "ppo.pzu.pl", Path = "/", Secure = true, SameSite = SameSiteAttribute.Lax },
+                new Cookie { Name = "language", Value = "pl", Domain = "ppo.pzu.pl", Path = "/", Secure = true, SameSite = SameSiteAttribute.Lax },
+                new Cookie { Name = "locale", Value = PolishLocale, Domain = "ppo.pzu.pl", Path = "/", Secure = true, SameSite = SameSiteAttribute.Lax },
+            ]);
+        }
+        catch
+        {
+            // best effort — nagłówki i Locale i tak wymuszają PL
+        }
+    }
 
     private static bool HasDownloadedPhotos(string directory) =>
         Directory.Exists(directory) && Directory.EnumerateFiles(directory).Any();
